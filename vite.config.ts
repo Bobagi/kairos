@@ -1,9 +1,26 @@
-import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
+import fs from 'fs';
+import path from 'path';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	server: {
+		host: '0.0.0.0',
+		port: 5173,
+		https: {
+			key: fs.readFileSync(path.resolve(__dirname, 'certs/localhost-key.pem')),
+			cert: fs.readFileSync(path.resolve(__dirname, 'certs/localhost.pem'))
+		},
+		proxy: {
+			'/game': {
+				target: 'https://chronos.bobagi.click',
+				changeOrigin: true,
+				secure: true
+			}
+		}
+	},
 	test: {
 		projects: [
 			{
