@@ -62,3 +62,9 @@ export async function endGameOnServer(gameId: string): Promise<void> {
 	const res = await fetch(`${API}/game/end/${gameId}`, { method: 'DELETE' });
 	if (!res.ok) throw new Error(`Failed to end game ${gameId}: ${res.status}`);
 }
+
+export async function getGameState(gameId: string): Promise<any> {
+	const res = await fetch(`${API}/game/state/${gameId}`);
+	if (!res.ok) throw new Error(`Failed to fetch game state: ${res.status}`);
+	return res.json();
+}
