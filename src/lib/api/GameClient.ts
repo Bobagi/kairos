@@ -68,3 +68,15 @@ export async function getGameState(gameId: string): Promise<any> {
 	if (!res.ok) throw new Error(`Failed to fetch game state: ${res.status}`);
 	return res.json();
 }
+
+export async function playCard(gameId: string, player: string, card: string): Promise<void> {
+	const res = await fetch(`${API}/game/play-card`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ gameId, player, card })
+	});
+	if (!res.ok) {
+		const details = await res.text();
+		throw new Error(`Play card failed (${res.status}): ${details}`);
+	}
+}

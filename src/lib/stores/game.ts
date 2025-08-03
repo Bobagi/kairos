@@ -14,6 +14,7 @@ export interface GameState {
 	turn: number;
 	lastActivity: number;
 	winner: string | null;
+	hp: Record<string, number>;
 	hands: Record<string, string[]>; // now dynamic: hands['alice'] is string[]
 	// you can add other fields here, e.g.:
 	// hp: Record<string, number>;

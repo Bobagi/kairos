@@ -1,34 +1,36 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { getGameState } from '$lib/api/GameClient';
+	import { getGameState, playCard } from '$lib/api/GameClient';
 	import GameStage from '$lib/components/GameStage.svelte';
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
 
-	// Error message if loading fails
+	/** Error message if loading fails */
 	let error: string | null = null;
 
-	// The game ID from the URL
+	/** The game ID from the URL */
 	$: gameId = $page.params.id;
 
-	// Derive the “current player” as the first in the players array
+	/** Derive the current player (first in the `players` array) */
 	$: currentPlayer = $game?.players?.[0] ?? 'unknown';
+	/** The opponent is the second player */
+	$: opponent = $game?.players?.[1] ?? 'unknown';
 
-	// Map backend card codes to the actual CDN filenames
+	/** Map the code names from the backend to your CDN filenames */
 	const imageMap: Record<string, string> = {
 		fireball: 'flamed-leaf.png',
 		heal: 'remedy.png',
 		lightning: 'power-lightning.png'
 	};
 
-	// Build the full image URL for a given card code
+	/** Build the full URL for a card’s image */
 	function cardUrl(code: string): string {
 		const filename = imageMap[code] ?? `${code}.png`;
 		return `https://bobagi.click/images/cards/${filename}`;
 	}
 
-	// On component mount, fetch the full game state and populate the store
-	onMount(async () => {
+	/** Fetch the game state and populate the store */
+	async function loadGame() {
 		if (!gameId) {
 			error = 'Missing game ID in URL';
 			return;
@@ -41,7 +43,23 @@
 			console.error(e);
 			error = 'Could not load game state';
 		}
-	});
+	}
+
+	/** Play a card: send to backend, then reload the state */
+	async function play(code: string) {
+		try {
+			await playCard(gameId, currentPlayer, code);
+			await loadGame();
+		} catch (e) {
+			console.error('Play card failed', e);
+		}
+	}
+
+	// On component mount, load the game
+	onMount(loadGame);
+
+	/** Maximum HP for scaling the bars */
+	const MAX_HP = 20;
 </script>
 
 <div class="flex flex-col gap-6 p-4">
@@ -52,24 +70,51 @@
 	{:else if !$game}
 		<p>Loading game…</p>
 	{:else}
-		<!-- PixiJS canvas for the board -->
+		<!-- ⬇️ Health bars for each player -->
+		<section class="space-y-2">
+			<div class="flex items-center justify-between">
+				<span class="font-medium">{currentPlayer}: {$game.hp[currentPlayer]} HP</span>
+				<span class="font-medium">{opponent}: {$game.hp[opponent]} HP</span>
+			</div>
+			<div class="flex gap-2">
+				<!-- Player bar -->
+				<div class="h-3 flex-1 overflow-hidden rounded bg-gray-700">
+					<div
+						class="h-full bg-green-500"
+						style="width: {($game.hp[currentPlayer] / MAX_HP) * 100}%"
+					></div>
+				</div>
+				<!-- Opponent bar -->
+				<div class="h-3 flex-1 overflow-hidden rounded bg-gray-700">
+					<div
+						class="h-full bg-red-500"
+						style="width: {($game.hp[opponent] / MAX_HP) * 100}%"
+					></div>
+				</div>
+			</div>
+		</section>
+
+		<!-- ⬇️ The PixiJS board -->
 		<GameStage />
 
-		<!-- Render the current player's hand -->
+		<!-- ⬇️ The player's hand as clickable cards -->
 		<section>
-			<h2 class="text-xl font-semibold">Your Hand ({currentPlayer})</h2>
-
+			<h2 class="mt-4 text-xl font-semibold">Your Hand ({currentPlayer})</h2>
 			{#if Array.isArray($game.hands[currentPlayer]) && $game.hands[currentPlayer].length > 0}
-				<div class="grid grid-cols-3 gap-4">
+				<div class="mt-2 grid grid-cols-3 gap-4">
 					{#each $game.hands[currentPlayer] as code}
-						<div class="flex flex-col items-center">
+						<button
+							type="button"
+							class="flex flex-col items-center focus:outline-none"
+							on:click={() => play(code)}
+						>
 							<img
 								src={cardUrl(code)}
 								alt={code}
 								class="w-full rounded shadow transition-transform hover:scale-105"
 							/>
 							<span class="mt-1 text-sm">{code}</span>
-						</div>
+						</button>
 					{/each}
 				</div>
 			{:else}
