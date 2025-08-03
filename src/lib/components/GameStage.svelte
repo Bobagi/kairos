@@ -1,19 +1,14 @@
-<!-- src/lib/components/GameStage.svelte -->
 <script lang="ts">
 	import { Application, Graphics } from 'pixi.js';
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 
-	// bind to this <canvas>
 	let canvasEl: HTMLCanvasElement;
-	let app: Application;
+	let app: Application | null = null;
 
-	onMount(() => {
-		if (!canvasEl) {
-			console.error('GameStage: canvas element not found!');
-			return;
-		}
+	onMount(async () => {
+		await tick();
+		if (!canvasEl) return;
 
-		// create the PIXI app, telling it to use our canvas
 		app = new Application({
 			view: canvasEl,
 			width: canvasEl.clientWidth,
@@ -22,14 +17,21 @@
 			antialias: true
 		});
 
-		// draw a quick red rectangle so we know it worked
-		const gfx = new Graphics().beginFill(0xff0000).drawRect(10, 10, 80, 50).endFill();
-
-		app.stage.addChild(gfx);
+		const g = new Graphics().beginFill(0xff0000).drawRect(10, 10, 80, 50).endFill();
+		app.stage.addChild(g);
 	});
 
 	onDestroy(() => {
-		app?.destroy(true);
+		// wrap in try/catch so destroy never bubbles
+		try {
+			if (app) {
+				app.destroy(true, { children: true, texture: false, baseTexture: false });
+				app = null;
+			}
+		} catch (e) {
+			// swallow any errors
+			console.warn('GameStage cleanup error (ignored):', e);
+		}
 	});
 </script>
 
