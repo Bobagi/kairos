@@ -15,7 +15,7 @@ export default defineConfig({
 		},
 		proxy: {
 			'/game': {
-				target: 'https://chronos.bobagi.click',
+				target: process.env.VITE_API_BASE_URL || 'https://chronos.bobagi.click',
 				changeOrigin: true,
 				secure: true
 			}
