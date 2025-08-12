@@ -1,4 +1,3 @@
-<!-- src/routes/game/[id]/+page.svelte -->
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
@@ -6,23 +5,15 @@
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
 
-	/** UI error message (network or server errors) */
 	let errorMessage: string | null = null;
-
-	/** Result when the game already ended (winner or tie) */
 	let finalResult: { winner: string | null; log: string[] } | null = null;
 
-	/** Game id from URL (reactive) */
 	$: gameId = $page.params.id;
-
-	/** Derive player ids (reactive based on store) */
 	$: playerIdA = $game?.players?.[0] ?? 'playerA';
 	$: playerIdB = $game?.players?.[1] ?? 'playerB';
 
-	/** Visual cap for HP bars */
 	const MAX_HP = 20;
 
-	/** Map a card code to the CDN filename (supports legacy + new codes) */
 	function filenameForCard(code: string): string {
 		if (code.includes('-')) return `${code}.png`;
 		switch (code) {
@@ -40,87 +31,100 @@
 		return `https://bobagi.click/images/cards/${filenameForCard(code)}`;
 	}
 
-	/** Load state; if not found (null), fetch final result to show outcome */
 	async function loadStateOrResult() {
 		errorMessage = null;
 		finalResult = null;
-
 		try {
 			const state = (await getGameState(gameId)) as GameState | null;
 			if (state && typeof state === 'object') {
 				game.set(state);
 				return;
 			}
-
-			// No in-memory state: try final summary
 			const result = await getGameResult(gameId);
 			finalResult = result;
 			game.set(null);
-		} catch (err) {
-			console.error(err);
+		} catch {
 			errorMessage = 'Could not load game state';
 			game.set(null);
 		}
 	}
 
-	/** Try to play a card, then reload */
 	async function onPlayCard(cardCode: string) {
 		try {
 			await playCard(gameId, playerIdA, cardCode);
-		} catch (err) {
-			console.error('Play card failed', err);
-		}
+		} catch {}
 		await loadStateOrResult();
 	}
 
-	/** Try to skip turn, then reload */
 	async function onSkipTurn() {
 		try {
 			await skipTurn(gameId, playerIdA);
-		} catch (err) {
-			console.error('Skip turn failed', err);
-		}
+		} catch {}
 		await loadStateOrResult();
 	}
 
 	onMount(loadStateOrResult);
 
-	/** Safe accessors for HP and hands even while loading */
 	$: hpA = $game?.hp?.[playerIdA] ?? 0;
 	$: hpB = $game?.hp?.[playerIdB] ?? 0;
 	$: handA = Array.isArray($game?.hands?.[playerIdA]) ? $game!.hands[playerIdA] : [];
+	$: deckCountA = Array.isArray($game?.decks?.[playerIdA]) ? $game!.decks[playerIdA].length : 0;
+	$: deckCountB = Array.isArray($game?.decks?.[playerIdB]) ? $game!.decks[playerIdB].length : 0;
+	$: endedDueToNoCards =
+		Array.isArray(finalResult?.log) && finalResult!.log.some((l) => /no cards/i.test(l));
 </script>
 
 <div class="flex flex-col gap-6 p-4">
 	<h1 class="text-2xl font-bold">Game {gameId}</h1>
 
 	{#if errorMessage}
-		<p class="text-red-600">{errorMessage}</p>
+		<section class="max-w-xl rounded border p-4">
+			<h2 class="text-xl font-semibold">Game unavailable</h2>
+			<p class="mt-1 text-gray-700">
+				This match has already finished or the state is no longer in memory.
+			</p>
+			<div class="mt-3 flex gap-3">
+				<a href="/" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+					>Back to home</a
+				>
+				<button
+					type="button"
+					class="rounded border px-4 py-2 hover:bg-gray-100"
+					on:click={loadStateOrResult}>Try again</button
+				>
+			</div>
+		</section>
 	{:else if finalResult}
-		<!-- Finished game (either win or tie) -->
-		<section class="space-y-2">
+		<section class="max-w-2xl space-y-3">
 			<h2 class="text-xl font-semibold">Game finished</h2>
 			{#if finalResult.winner === null}
-				<p class="text-amber-600">Tie game — no winner.</p>
+				<p class="text-amber-700">Tie game.</p>
+				{#if endedDueToNoCards}
+					<p class="text-gray-700">Both players ran out of cards.</p>
+				{/if}
 			{:else}
-				<p class="text-green-600">Winner: {finalResult.winner}</p>
+				<p class="text-green-700">Winner: {finalResult.winner}</p>
 			{/if}
 			{#if Array.isArray(finalResult.log)}
-				<div class="mt-2 max-h-64 overflow-auto rounded border p-2 text-sm">
+				<div class="mt-1 max-h-64 overflow-auto rounded border p-2 text-sm">
 					{#each finalResult.log as line, i}
 						<div>{i + 1}. {line}</div>
 					{/each}
 				</div>
 			{/if}
+			<div class="pt-2">
+				<a href="/" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+					>Back to home</a
+				>
+			</div>
 		</section>
 	{:else if !$game}
 		<p>Loading game…</p>
 	{:else}
-		<!-- HP bars -->
 		<section class="space-y-2">
 			<div class="flex items-center justify-between">
-				<span class="font-medium">{playerIdA}: {hpA} HP</span>
-				<span class="font-medium">{playerIdB}: {hpB} HP</span>
+				<span class="font-medium">{playerIdA}: {hpA} HP • Deck {deckCountA}</span>
+				<span class="font-medium">{playerIdB}: {hpB} HP • Deck {deckCountB}</span>
 			</div>
 			<div class="flex gap-2">
 				<div class="h-3 flex-1 overflow-hidden rounded bg-gray-700">
@@ -138,12 +142,10 @@
 			</div>
 		</section>
 
-		<!-- Pixi board -->
 		<GameStage />
 
-		<!-- Player A hand (clickable) -->
 		<section>
-			<h2 class="mt-4 text-xl font-semibold">Your Hand ({playerIdA})</h2>
+			<h2 class="mt-4 text-xl font-semibold">Your Hand ({playerIdA}) • Deck {deckCountA}</h2>
 
 			{#if handA.length > 0}
 				<div class="mt-2 grid grid-cols-3 gap-4">
@@ -179,7 +181,6 @@
 			{/if}
 		</section>
 
-		<!-- Lightweight log to help visualize flow -->
 		{#if Array.isArray($game.log)}
 			<section class="mt-2">
 				<h3 class="font-semibold">Log</h3>
