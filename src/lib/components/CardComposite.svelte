@@ -10,11 +10,43 @@
 	export let titleTopPercent = 3;
 	export let titleLeftPercent = 29;
 	export let titleHeightPercent = 18;
+
+	// Tilt
+	export let enableTilt = true;
+	export let tiltMaxRotateDeg = 14;
+	export let tiltScale = 1.04;
+	export let tiltTransitionMs = 120;
+
+	let wrapperEl: HTMLDivElement | null = null;
+
+	function handleMouseMove(e: MouseEvent) {
+		if (!enableTilt || !wrapperEl) return;
+		const r = wrapperEl.getBoundingClientRect();
+		const px = (e.clientX - r.left) / r.width;
+		const py = (e.clientY - r.top) / r.height;
+		const rotY = (px - 0.5) * 2 * tiltMaxRotateDeg;
+		const rotX = -(py - 0.5) * 2 * tiltMaxRotateDeg;
+		wrapperEl.style.transform = `perspective(900px) rotateX(${rotX}deg) rotateY(${rotY}deg) scale(${tiltScale})`;
+	}
+
+	function handleMouseLeave() {
+		if (!wrapperEl) return;
+		wrapperEl.style.transform = 'perspective(900px) rotateX(0deg) rotateY(0deg) scale(1)';
+	}
+
+	function handleMouseEnter() {
+		if (!wrapperEl) return;
+		wrapperEl.style.transition = `transform ${tiltTransitionMs}ms ease`;
+	}
 </script>
 
 <div
+	bind:this={wrapperEl}
+	on:mousemove={handleMouseMove}
+	on:mouseleave={handleMouseLeave}
+	on:mouseenter={handleMouseEnter}
 	aria-label={titleText ?? 'card'}
-	style={`position:relative;width:100%;aspect-ratio:${aspectWidth}/${aspectHeight};overflow:hidden;border-radius:8px;`}
+	style={`position:relative;width:100%;aspect-ratio:${aspectWidth}/${aspectHeight};overflow:hidden;border-radius:8px;transform:perspective(900px);will-change:transform;`}
 >
 	<img
 		src={artImageUrl}

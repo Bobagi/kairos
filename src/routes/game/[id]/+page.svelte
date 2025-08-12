@@ -181,6 +181,7 @@
 								aspectWidth={430}
 								aspectHeight={670}
 								artObjectFit="cover"
+								enableTilt={true}
 							/>
 							<span class="mt-1 w-full truncate text-center text-sm">{code}</span>
 						</button>
