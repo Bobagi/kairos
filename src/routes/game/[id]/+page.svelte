@@ -15,6 +15,7 @@
 	$: playerIdB = $game?.players?.[1] ?? 'playerB';
 
 	const MAX_HP = 20;
+	const cardWidthCss = 'clamp(110px, 22vw, 220px)';
 
 	function filenameForCard(code: string): string {
 		if (code.includes('-')) return `${code}.png`;
@@ -40,9 +41,7 @@
 			const remote =
 				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
 			if (remote) localFrameUrl = remote;
-		} catch {
-			localFrameUrl = null;
-		}
+		} catch {}
 	}
 
 	async function loadStateOrResult() {
@@ -165,23 +164,25 @@
 			<h2 class="mt-4 text-xl font-semibold">Your Hand ({playerIdA}) • Deck {deckCountA}</h2>
 
 			{#if handA.length > 0}
-				<div class="mt-2 grid grid-cols-3 gap-4">
+				<div class="mt-2 flex flex-wrap gap-4">
 					{#each handA as code}
 						<button
 							type="button"
-							class="flex w-full flex-col items-center focus:outline-none"
+							class="flex shrink-0 flex-col items-center focus:outline-none"
+							style={`width:${cardWidthCss}`}
 							title={`Play ${code}`}
 							on:click={() => onPlayCard(code)}
 						>
 							<CardComposite
 								artImageUrl={imageUrlForCard(code)}
-								frameImageUrl={localFrameUrl}
-								labelTitle={code}
+								frameImageUrl={localFrameUrl ?? '/frames/default.png'}
+								titleImageUrl="/frames/title.png"
+								titleText={code}
 								aspectWidth={430}
 								aspectHeight={670}
 								artObjectFit="cover"
 							/>
-							<span class="mt-1 text-sm">{code}</span>
+							<span class="mt-1 w-full truncate text-center text-sm">{code}</span>
 						</button>
 					{/each}
 				</div>
