@@ -3,10 +3,9 @@
 	export let cardBackImageUrl: string;
 	export let aspectWidth = 430;
 	export let aspectHeight = 670;
-	export let maxVisible = 7;
-	export let offsetXPx = 4;
-	export let offsetYPx = 3;
-	export let rotateStepDeg = 0.8;
+	export let maxVisible = 20;
+	export let offsetXPx = 2;
+	export let offsetYPx = 1;
 
 	$: visibleCount = Math.min(deckCount, maxVisible);
 	$: layers = Array.from({ length: visibleCount }, (_, i) => i);
@@ -18,7 +17,7 @@
 	{#each layers as i (i)}
 		<div
 			style="position:absolute;inset:0;border-radius:10px;overflow:hidden;pointer-events:none;"
-			style:transform={`translate(${i * offsetXPx}px, ${i * offsetYPx}px) rotate(${i * rotateStepDeg}deg)`}
+			style:transform={`translate(${i * offsetXPx}px, ${i * offsetYPx}px)`}
 			style:z-index={i}
 		>
 			<img

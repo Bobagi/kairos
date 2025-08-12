@@ -16,7 +16,7 @@
 	$: gameId = $page.params.id;
 
 	const MAX_HP = 20;
-	const cardWidthCss = 'clamp(110px, 22vw, 220px)';
+	const cardWidthCss = 'clamp(104px, 17.5vw, 200px)';
 
 	type HandItem = { code: string; uid: string };
 	let handItems: HandItem[] = [];
@@ -39,67 +39,52 @@
 	function imageUrlForCard(code: string): string {
 		return `https://bobagi.click/images/cards/${filenameForCard(code)}`;
 	}
-
 	function makeUid() {
 		return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 	}
 
-	// Reconciliador: transforma array de códigos do backend em itens {code, uid}
-	// Reusa uids existentes quando possível; cria novos uids para ocorrências novas (essas já nascem flipando).
 	function reconcileHand(
 		prev: HandItem[],
 		codes: string[]
 	): { items: HandItem[]; created: string[] } {
-		const oldCodes = prev.map((it) => it.code);
-		const newCodes = codes;
-
-		const n = oldCodes.length;
-		const m = newCodes.length;
-
-		const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
-		for (let i = n - 1; i >= 0; i--) {
-			for (let j = m - 1; j >= 0; j--) {
-				dp[i][j] =
-					oldCodes[i] === newCodes[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
-			}
-		}
-
-		const matchedOldToNew = new Map<number, number>();
+		const old = prev.map((p) => p.code),
+			nw = codes;
+		const n = old.length,
+			m = nw.length,
+			dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+		for (let i = n - 1; i >= 0; i--)
+			for (let j = m - 1; j >= 0; j--)
+				dp[i][j] = old[i] === nw[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+		const map = new Map<number, number>();
 		let i = 0,
 			j = 0;
 		while (i < n && j < m) {
-			if (oldCodes[i] === newCodes[j]) {
-				matchedOldToNew.set(i, j);
+			if (old[i] === nw[j]) {
+				map.set(i, j);
 				i++;
 				j++;
-			} else if (dp[i + 1][j] >= dp[i][j + 1]) {
-				i++;
-			} else {
-				j++;
-			}
+			} else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+			else j++;
 		}
-
-		const usedOld = new Set<number>();
+		const used = new Set<number>();
 		const created: string[] = [];
 		const items: HandItem[] = [];
-
-		for (let newIdx = 0; newIdx < m; newIdx++) {
+		for (let nj = 0; nj < m; nj++) {
 			let reused = false;
-			for (const [oldIdx, mappedNewIdx] of matchedOldToNew) {
-				if (mappedNewIdx === newIdx && !usedOld.has(oldIdx)) {
-					items.push(prev[oldIdx]);
-					usedOld.add(oldIdx);
+			for (const [oi, mj] of map) {
+				if (mj === nj && !used.has(oi)) {
+					items.push(prev[oi]);
+					used.add(oi);
 					reused = true;
 					break;
 				}
 			}
 			if (!reused) {
-				const uid = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-				items.push({ code: newCodes[newIdx], uid });
+				const uid = makeUid();
+				items.push({ code: nw[nj], uid });
 				created.push(uid);
 			}
 		}
-
 		return { items, created };
 	}
 
@@ -115,15 +100,13 @@
 
 	async function loadStateOrResult() {
 		errorMessage = null;
-		finalResult = null;
 		try {
 			const state = (await getGameState(gameId)) as GameState | null;
 			if (state && typeof state === 'object') {
+				finalResult = null;
 				game.set(state);
-
 				const aId = state.players[0];
 				const codes = Array.isArray(state.hands?.[aId]) ? (state.hands[aId] as string[]) : [];
-
 				const { items, created } = reconcileHand(handItems, codes);
 				handItems = items;
 				if (created.length) {
@@ -132,12 +115,14 @@
 				}
 				return;
 			}
+		} catch {
+			/* fallthrough to result */
+		}
+		try {
 			const result = await getGameResult(gameId);
 			finalResult = result;
-			game.set(null);
 		} catch {
 			errorMessage = 'Could not load game state';
-			game.set(null);
 		}
 	}
 
@@ -168,6 +153,7 @@
 	$: hpB = $game?.hp?.[playerIdB] ?? 0;
 	$: deckCountA = Array.isArray($game?.decks?.[playerIdA]) ? $game!.decks[playerIdA].length : 0;
 	$: deckCountB = Array.isArray($game?.decks?.[playerIdB]) ? $game!.decks[playerIdB].length : 0;
+	$: oppHandCount = Array.isArray($game?.hands?.[playerIdB]) ? $game!.hands[playerIdB].length : 0;
 	$: endedDueToNoCards =
 		Array.isArray(finalResult?.log) && finalResult!.log.some((l) => /no cards/i.test(l));
 
@@ -176,72 +162,115 @@
 	}
 </script>
 
-<div class="flex flex-col gap-6 p-4">
-	<h1 class="text-2xl font-bold">Game {gameId}</h1>
+<div class="board">
+	<section class="zone opponent">
+		<div class="zone-header">
+			<span class="name">👤 {playerIdB}</span>
+			<span class="pill hp">❤️ {hpB}</span>
+			<span class="pill deck">🃏 {deckCountB}</span>
+		</div>
+		<div class="zone-row">
+			<div class="hand opp-hand">
+				{#each Array.from({ length: oppHandCount }) as _, i}
+					<div class="card-socket" style={`width:${cardWidthCss}`}>
+						<div class="card-back-wrap" title="Opponent card">
+							<img
+								src="/frames/card-back.png"
+								alt="card-back"
+								style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;display:block;"
+								loading="eager"
+								decoding="sync"
+								draggable="false"
+							/>
+						</div>
+					</div>
+				{/each}
+			</div>
+			<div class="deck-block">
+				<DeckStack
+					deckCount={deckCountB}
+					cardBackImageUrl="/frames/card-back.png"
+					aspectWidth={430}
+					aspectHeight={670}
+					maxVisible={7}
+					offsetXPx={4}
+					offsetYPx={3}
+					rotateStepDeg={0.8}
+				/>
+			</div>
+		</div>
+	</section>
 
-	{#if errorMessage}
-		<section class="max-w-xl rounded border p-4">
-			<h2 class="text-xl font-semibold">Game unavailable</h2>
-			<p class="mt-1 text-gray-700">
-				This match has already finished or the state is no longer in memory.
-			</p>
-			<div class="mt-3 flex gap-3">
-				<a href="/" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-					>Back to home</a
-				>
-				<button
-					type="button"
-					class="rounded border px-4 py-2 hover:bg-gray-100"
-					on:click={loadStateOrResult}>Try again</button
-				>
+	<section class="zone center">
+		<div class="status-pill">
+			<div class="side">
+				<span class="tag">👤</span><span class="who">{playerIdA}</span><span class="sep">•</span
+				><span class="tag">❤️</span>
+				{hpA}<span class="sep">•</span><span class="tag">🃏</span>
+				{deckCountA}
 			</div>
-		</section>
-	{:else if finalResult}
-		<section class="max-w-2xl space-y-3">
-			<h2 class="text-xl font-semibold">Game finished</h2>
-			{#if finalResult.winner === null}
-				<p class="text-amber-700">Tie game.</p>
-				{#if endedDueToNoCards}<p class="text-gray-700">Both players ran out of cards.</p>{/if}
-			{:else}
-				<p class="text-green-700">Winner: {finalResult.winner}</p>
-			{/if}
-			{#if Array.isArray(finalResult.log)}
-				<div class="mt-1 max-h-64 overflow-auto rounded border p-2 text-sm">
-					{#each finalResult.log as line, i}<div>{i + 1}. {line}</div>{/each}
-				</div>
-			{/if}
-			<div class="pt-2">
-				<a href="/" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-					>Back to home</a
-				>
+			<div class="vs">VS</div>
+			<div class="side">
+				<span class="tag">👤</span><span class="who">{playerIdB}</span><span class="sep">•</span
+				><span class="tag">❤️</span>
+				{hpB}<span class="sep">•</span><span class="tag">🃏</span>
+				{deckCountB}
 			</div>
-		</section>
-	{:else if !$game}
-		<p>Loading game…</p>
-	{:else}
-		<section class="space-y-2">
-			<div class="flex items-center justify-between">
-				<span class="font-medium">{playerIdA}: {hpA} HP • Deck {deckCountA}</span>
-				<span class="font-medium">{playerIdB}: {hpB} HP • Deck {deckCountB}</span>
-			</div>
-			<div class="flex gap-2">
-				<div class="h-3 flex-1 overflow-hidden rounded bg-gray-700">
-					<div
-						class="h-full bg-green-500"
-						style="width:{Math.max(0, Math.min(100, (hpA / MAX_HP) * 100))}%"
-					/>
-				</div>
-				<div class="h-3 flex-1 overflow-hidden rounded bg-gray-700">
-					<div
-						class="h-full bg-red-500"
-						style="width:{Math.max(0, Math.min(100, (hpB / MAX_HP) * 100))}%"
-					/>
-				</div>
-			</div>
-		</section>
+		</div>
 
-		<section class="mt-2 flex items-end justify-between">
-			<div class="flex items-center gap-3">
+		<div class="center-right">
+			{#if finalResult}
+				<div class="notice success">
+					<div class="title">Game finished</div>
+					{#if finalResult.winner === null}
+						<div class="msg">
+							Tie game{endedDueToNoCards ? ' — both players ran out of cards' : ''}.
+						</div>
+					{:else}
+						<div class="msg">Winner: {finalResult.winner}</div>
+					{/if}
+					<div class="actions">
+						<a class="btn" href="/">Back to home</a>
+						<button class="btn ghost" on:click={loadStateOrResult}>Refresh</button>
+					</div>
+				</div>
+			{/if}
+
+			{#if !finalResult && errorMessage}
+				<div class="notice error">
+					<div class="title">Network issue</div>
+					<div class="msg">{errorMessage}</div>
+					<button class="btn" on:click={loadStateOrResult}>Try again</button>
+				</div>
+			{/if}
+
+			{#if handItems.length === 0 && !finalResult}
+				<div class="notice warn">
+					<div class="title">No cards in hand</div>
+					<div class="msg">Draw or skip your turn.</div>
+					<button class="btn" on:click={onSkipTurn}>Skip turn</button>
+				</div>
+			{/if}
+
+			{#if Array.isArray($game?.log)}
+				<div class="logbox">
+					{#each $game.log.slice(-18) as line, i}
+						<div class="logline">{$game.log.length - 18 + i + 1}. {line}</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
+	</section>
+
+	<section class="zone player">
+		<div class="zone-header">
+			<span class="name">👤 {playerIdA}</span>
+			<span class="pill hp">❤️ {hpA}</span>
+			<span class="pill deck">🃏 {deckCountA}</span>
+		</div>
+
+		<div class="zone-row">
+			<div class="deck-block left">
 				<DeckStack
 					deckCount={deckCountA}
 					cardBackImageUrl="/frames/card-back.png"
@@ -252,85 +281,245 @@
 					offsetYPx={3}
 					rotateStepDeg={0.8}
 				/>
-				<div class="text-sm text-gray-700">Deck {deckCountA}</div>
 			</div>
-			<div class="text-sm text-gray-700">Opponent Deck {deckCountB}</div>
-		</section>
 
-		<section>
-			<h2 class="mt-4 text-xl font-semibold">Your Hand ({playerIdA}) • Deck {deckCountA}</h2>
-
-			{#if handItems.length > 0}
-				<div class="mt-2 flex flex-wrap gap-4">
-					{#each handItems as it (it.uid)}
-						{#key it.uid}
-							<button
-								type="button"
-								class="flex shrink-0 flex-col items-center focus:outline-none"
-								style={`width:${cardWidthCss}`}
-								title={`Play ${it.code}`}
-								on:click={() => onPlayCard(it.code)}
-							>
-								<div class="flip-wrap" data-cycle={flipCycle}>
-									<div
-										class="flipper"
-										class:animate={pendingReveal.has(it.uid)}
-										on:animationend={() => handleFlipEnd(it.uid)}
-										style="--flip-ms:700ms;"
-									>
-										<div class="face front">
-											<CardComposite
-												artImageUrl={imageUrlForCard(it.code)}
-												frameImageUrl={frameOverlayUrl ?? '/frames/default.png'}
-												titleImageUrl={titleOverlayUrl}
-												titleText={it.code}
-												aspectWidth={430}
-												aspectHeight={670}
-												artObjectFit="cover"
-												enableTilt={true}
-											/>
-										</div>
-										<div class="face back">
-											<img
-												src={cardBackImageUrl}
-												alt="card-back"
-												style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:8px;display:block;"
-												loading="eager"
-												decoding="sync"
-												draggable="false"
-											/>
-										</div>
+			<div class="hand my-hand">
+				{#each handItems as it (it.uid)}
+					{#key it.uid}
+						<button
+							type="button"
+							class="card-socket focus:outline-none"
+							style={`width:${cardWidthCss}`}
+							title={`Play ${it.code}`}
+							on:click={() => onPlayCard(it.code)}
+						>
+							<div class="flip-wrap" data-cycle={flipCycle}>
+								<div
+									class="flipper"
+									class:animate={pendingReveal.has(it.uid)}
+									on:animationend={() => handleFlipEnd(it.uid)}
+									style="--flip-ms:700ms;"
+								>
+									<div class="face front">
+										<CardComposite
+											artImageUrl={imageUrlForCard(it.code)}
+											frameImageUrl={frameOverlayUrl ?? '/frames/default.png'}
+											titleImageUrl={titleOverlayUrl}
+											titleText={it.code}
+											aspectWidth={430}
+											aspectHeight={670}
+											artObjectFit="cover"
+											enableTilt={true}
+										/>
+									</div>
+									<div class="face back">
+										<img
+											src={cardBackImageUrl}
+											alt="card-back"
+											style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;display:block;"
+											loading="eager"
+											decoding="sync"
+											draggable="false"
+										/>
 									</div>
 								</div>
-								<span class="mt-1 w-full truncate text-center text-sm">{it.code}</span>
-							</button>
-						{/key}
-					{/each}
-				</div>
-			{:else}
-				<div class="mt-2 flex items-center gap-3">
-					<p class="text-gray-500">No cards in hand</p>
-					<button
-						type="button"
-						class="rounded bg-amber-600 px-3 py-2 text-white hover:bg-amber-700"
-						on:click={onSkipTurn}>Skip turn</button
-					>
-				</div>
-			{/if}
-		</section>
-
-		{#if Array.isArray($game.log)}
-			<section class="mt-2">
-				<h3 class="font-semibold">Log</h3>
-				<ul class="mt-1 max-h-48 space-y-1 overflow-auto rounded border p-2 text-sm">
-					{#each $game.log as line, i}<li class="text-gray-700">{i + 1}. {line}</li>{/each}
-				</ul>
-			</section>
-		{/if}
-	{/if}
+							</div>
+						</button>
+					{/key}
+				{/each}
+			</div>
+		</div>
+	</section>
 </div>
 
 <style>
+	:global(body) {
+		background: radial-gradient(ellipse at center, #0b2a2e 0%, #0a1d20 70%, #071418 100%);
+	}
+
+	.board {
+		max-width: 1200px;
+		margin: 16px auto;
+		display: grid;
+		grid-template-rows: auto auto auto;
+		gap: 14px;
+		padding: 10px;
+	}
+	.zone {
+		border-radius: 12px;
+		padding: 10px;
+		background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02));
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+	}
+	.zone.center {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 12px;
+		align-items: start;
+		min-height: 220px;
+	}
+	.zone-header {
+		display: flex;
+		gap: 10px;
+		align-items: center;
+		padding: 2px 6px 8px;
+		color: #d7e7ea;
+		font-weight: 700;
+	}
+	.pill {
+		background: rgba(0, 0, 0, 0.25);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-weight: 600;
+	}
+	.pill.hp {
+		color: #ffd4d4;
+	}
+	.pill.deck {
+		color: #e7f2f3;
+	}
+	.name {
+		font-size: clamp(13px, 2vw, 18px);
+		margin-right: 6px;
+	}
+	.zone-row {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 12px;
+		align-items: end;
+	}
+	.deck-block {
+		width: clamp(84px, 10vw, 120px);
+	}
+	.deck-block.left {
+		order: -1;
+	}
+
+	.hand {
+		display: flex;
+		flex-wrap: nowrap;
+		gap: clamp(8px, 1.2vw, 14px);
+		overflow-x: auto;
+		padding: 4px 2px;
+		scrollbar-width: thin;
+	}
+	.hand::-webkit-scrollbar {
+		height: 8px;
+	}
+	.hand::-webkit-scrollbar-thumb {
+		background: rgba(255, 255, 255, 0.15);
+		border-radius: 8px;
+	}
+	.card-socket {
+		position: relative;
+		aspect-ratio: 430/670;
+		border-radius: 10px;
+	}
+	.card-back-wrap {
+		position: relative;
+		width: 100%;
+		aspect-ratio: 430/670;
+		border-radius: 10px;
+		box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+	}
+
+	.status-pill {
+		align-self: start;
+		color: #e7f2f3;
+		background: rgba(255, 255, 255, 0.07);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		padding: 8px 12px;
+		border-radius: 16px;
+		display: flex;
+		gap: 16px;
+		align-items: center;
+		font-weight: 700;
+	}
+	.status-pill .side {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+	.status-pill .tag {
+		opacity: 0.85;
+	}
+	.status-pill .sep {
+		opacity: 0.5;
+		margin: 0 4px;
+	}
+	.status-pill .vs {
+		opacity: 0.8;
+	}
+
+	.center-right {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		align-items: stretch;
+	}
+	.logbox {
+		width: min(540px, 46vw);
+		height: 160px;
+		overflow: auto;
+		padding: 8px;
+		border-radius: 10px;
+		background: rgba(0, 0, 0, 0.25);
+		color: #d6e6e9;
+		font-size: 12px;
+		line-height: 1.25;
+		border: 1px solid rgba(255, 255, 255, 0.06);
+	}
+	.logline {
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		overflow: hidden;
+	}
+
+	.notice {
+		border-radius: 10px;
+		padding: 10px;
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+	}
+	.notice .title {
+		font-weight: 800;
+		margin-bottom: 4px;
+	}
+	.notice .msg {
+		opacity: 0.95;
+		margin-bottom: 8px;
+	}
+	.notice.warn {
+		background: rgba(255, 193, 7, 0.08);
+		color: #ffe9b3;
+	}
+	.notice.success {
+		background: rgba(0, 180, 60, 0.1);
+		color: #c6f5d6;
+	}
+	.notice.error {
+		background: rgba(200, 0, 0, 0.1);
+		color: #ffd6d6;
+	}
+	.btn {
+		background: #b07500;
+		color: white;
+		border-radius: 8px;
+		padding: 6px 10px;
+	}
+	.btn:hover {
+		background: #915f00;
+	}
+	.btn.ghost {
+		background: transparent;
+		border: 1px solid rgba(255, 255, 255, 0.25);
+		color: #e7f2f3;
+	}
+	.btn.ghost:hover {
+		background: rgba(255, 255, 255, 0.06);
+	}
+
 	.flip-wrap {
 		position: relative;
 		width: 100%;
@@ -341,7 +530,7 @@
 		position: absolute;
 		inset: 0;
 		transform-style: preserve-3d;
-		border-radius: 8px;
+		border-radius: 10px;
 		overflow: visible;
 	}
 	.face {
