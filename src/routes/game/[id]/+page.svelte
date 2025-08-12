@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
+	import CardComposite from '$lib/components/CardComposite.svelte';
 	import GameStage from '$lib/components/GameStage.svelte';
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
 
+	let localFrameUrl: string | null = '/frames/default.png';
 	let errorMessage: string | null = null;
 	let finalResult: { winner: string | null; log: string[] } | null = null;
 
@@ -29,6 +31,18 @@
 	}
 	function imageUrlForCard(code: string): string {
 		return `https://bobagi.click/images/cards/${filenameForCard(code)}`;
+	}
+
+	async function loadTemplatesOnce() {
+		try {
+			const res = await fetch('/game/templates');
+			const templates = (await res.json()) as Array<{ frameUrl?: string }>;
+			const remote =
+				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
+			if (remote) localFrameUrl = remote;
+		} catch {
+			localFrameUrl = null;
+		}
 	}
 
 	async function loadStateOrResult() {
@@ -63,7 +77,10 @@
 		await loadStateOrResult();
 	}
 
-	onMount(loadStateOrResult);
+	onMount(async () => {
+		await loadTemplatesOnce();
+		await loadStateOrResult();
+	});
 
 	$: hpA = $game?.hp?.[playerIdA] ?? 0;
 	$: hpB = $game?.hp?.[playerIdB] ?? 0;
@@ -152,16 +169,17 @@
 					{#each handA as code}
 						<button
 							type="button"
-							class="flex flex-col items-center focus:outline-none"
+							class="flex w-full flex-col items-center focus:outline-none"
 							title={`Play ${code}`}
 							on:click={() => onPlayCard(code)}
 						>
-							<img
-								src={imageUrlForCard(code)}
-								alt={code}
-								class="w-full rounded shadow transition-transform hover:scale-105"
-								loading="eager"
-								decoding="sync"
+							<CardComposite
+								artImageUrl={imageUrlForCard(code)}
+								frameImageUrl={localFrameUrl}
+								labelTitle={code}
+								aspectWidth={430}
+								aspectHeight={670}
+								artObjectFit="cover"
 							/>
 							<span class="mt-1 text-sm">{code}</span>
 						</button>
