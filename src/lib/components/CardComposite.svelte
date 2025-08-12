@@ -7,10 +7,9 @@
 	export let aspectHeight = 670;
 	export let artObjectFit: 'cover' | 'contain' = 'cover';
 
-	export let titleTopPercent = 4;
-	export let titleLeftPercent = 6;
-	export let titleRightPercent = 6;
-	export let titleHeightPercent = 12;
+	export let titleTopPercent = 3;
+	export let titleLeftPercent = 29;
+	export let titleHeightPercent = 18;
 </script>
 
 <div
@@ -37,7 +36,7 @@
 		<img
 			src={titleImageUrl}
 			alt="card-title-frame"
-			style={`position:absolute;left:${titleLeftPercent}%;right:${titleRightPercent}%;top:${titleTopPercent}%;height:${titleHeightPercent}%;width:auto;display:block;pointer-events:none;z-index:2;`}
+			style={`position:absolute;left:${titleLeftPercent}%;top:${titleTopPercent}%;height:${titleHeightPercent}%;width:auto;display:block;pointer-events:none;z-index:2;`}
 			loading="eager"
 			decoding="sync"
 			draggable="false"
@@ -45,7 +44,7 @@
 	{/if}
 	{#if titleText}
 		<div
-			style={`position:absolute;left:${titleLeftPercent}%;right:${titleRightPercent}%;top:${titleTopPercent}%;height:${titleHeightPercent}%;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:clamp(12px,2.4vw,20px);line-height:1;letter-spacing:.5px;padding:0 .4rem;z-index:3;pointer-events:none;`}
+			style={`position:absolute;left:${titleLeftPercent}%;top:${titleTopPercent}%;height:${titleHeightPercent}%;display:flex;align-items:normal;justify-content:center;text-align:center;color:whitesmoke;font-weight:700;font-size:clamp(9px,2.4vw,20px);line-height:1;letter-spacing:.5px;padding:0.3rem 0px 0px 0.7rem;z-index:3;pointer-events:none;`}
 		>
 			{titleText}
 		</div>
