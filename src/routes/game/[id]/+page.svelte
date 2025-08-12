@@ -2,11 +2,14 @@
 	import { page } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
-	import GameStage from '$lib/components/GameStage.svelte';
+	import DeckStack from '$lib/components/DeckStack.svelte';
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
 
 	let localFrameUrl: string | null = '/frames/default.png';
+	const titleOverlayUrl = '/frames/title.png';
+	const cardBackImageUrl = '/frames/card-back.png';
+
 	let errorMessage: string | null = null;
 	let finalResult: { winner: string | null; log: string[] } | null = null;
 
@@ -16,6 +19,9 @@
 
 	const MAX_HP = 20;
 	const cardWidthCss = 'clamp(110px, 22vw, 220px)';
+
+	let previousHandACodes: string[] = [];
+	let lastDrawnCode: string | null = null;
 
 	function filenameForCard(code: string): string {
 		if (code.includes('-')) return `${code}.png`;
@@ -48,11 +54,22 @@
 		errorMessage = null;
 		finalResult = null;
 		try {
+			const prev = $game;
+			const prevHand = Array.isArray(prev?.hands?.[playerIdA]) ? [...prev!.hands[playerIdA]] : [];
+
 			const state = (await getGameState(gameId)) as GameState | null;
 			if (state && typeof state === 'object') {
 				game.set(state);
+				const newHand = Array.isArray(state.hands?.[playerIdA]) ? state.hands[playerIdA] : [];
+				if (newHand.length > prevHand.length) {
+					lastDrawnCode = newHand[newHand.length - 1] ?? null;
+				} else {
+					lastDrawnCode = null;
+				}
+				previousHandACodes = newHand.slice();
 				return;
 			}
+
 			const result = await getGameResult(gameId);
 			finalResult = result;
 			game.set(null);
@@ -158,7 +175,27 @@
 			</div>
 		</section>
 
-		<GameStage />
+		<section class="mt-2 flex items-end justify-between">
+			<div class="flex items-center gap-3">
+				<DeckStack
+					deckCount={deckCountA}
+					{cardBackImageUrl}
+					aspectWidth={430}
+					aspectHeight={670}
+					maxVisible={7}
+					offsetXPx={3}
+					offsetYPx={2}
+					rotateStepDeg={0.6}
+					flipDurationMs={700}
+					frontArtImageUrl={lastDrawnCode ? imageUrlForCard(lastDrawnCode) : null}
+					frontFrameImageUrl={localFrameUrl}
+					frontTitleImageUrl={titleOverlayUrl}
+					frontTitleText={lastDrawnCode}
+				/>
+				<div class="text-sm text-gray-700">Deck {deckCountA}</div>
+			</div>
+			<div class="text-sm text-gray-700">Opponent Deck {deckCountB}</div>
+		</section>
 
 		<section>
 			<h2 class="mt-4 text-xl font-semibold">Your Hand ({playerIdA}) • Deck {deckCountA}</h2>
@@ -176,12 +213,11 @@
 							<CardComposite
 								artImageUrl={imageUrlForCard(code)}
 								frameImageUrl={localFrameUrl ?? '/frames/default.png'}
-								titleImageUrl="/frames/title.png"
+								titleImageUrl={titleOverlayUrl}
 								titleText={code}
 								aspectWidth={430}
 								aspectHeight={670}
 								artObjectFit="cover"
-								enableTilt={true}
 							/>
 							<span class="mt-1 w-full truncate text-center text-sm">{code}</span>
 						</button>
