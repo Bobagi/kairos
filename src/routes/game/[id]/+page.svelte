@@ -1,9 +1,12 @@
+<!-- src/routes/game/[id]/+page.svelte -->
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import CenterPanel from '$lib/components/CenterPanel.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
+	import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
+	import { fx } from '$lib/stores/fx';
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
 	/* ===== global CSS for this route ===== */
@@ -228,6 +231,43 @@
 		if (myHandEl) ro.observe(myHandEl);
 	}
 	$: computeSpread(); // recompute whenever the hand changes
+
+	// ---------- FX wiring ----------
+	let oppHpPill: HTMLSpanElement | null = null;
+	let myHpPill: HTMLSpanElement | null = null;
+
+	type FxMap = { kind: 'damage' | 'heal'; amount: number; target: 'opp' | 'me' };
+	function cardEffect(code: string): FxMap {
+		switch (code) {
+			case 'lightning':
+				return { kind: 'damage', amount: 3, target: 'opp' };
+			case 'fireball':
+				return { kind: 'damage', amount: 5, target: 'opp' };
+			case 'heal':
+				return { kind: 'heal', amount: 4, target: 'me' };
+			default:
+				return { kind: 'damage', amount: 1, target: 'opp' };
+		}
+	}
+
+	function playWithFx(e: MouseEvent, code: string) {
+		const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const { kind, amount, target } = cardEffect(code);
+		const targetEl = target === 'opp' ? oppHpPill : myHpPill;
+		if (targetEl) {
+			const targetRect = targetEl.getBoundingClientRect();
+			fx.start({
+				fromRect,
+				targetRect,
+				imgUrl: imageUrlForCard(code),
+				frameUrl: frameOverlayUrl,
+				kind,
+				amount
+			});
+		}
+		// trigger the real play
+		onPlayCard(code);
+	}
 </script>
 
 <div class="board">
@@ -235,7 +275,7 @@
 	<section class="zone opponent">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdB}</span>
-			<span class="pill hp">❤️ {displayedHpB}</span>
+			<span class="pill hp" bind:this={oppHpPill}>❤️ {displayedHpB}</span>
 			<span class="pill deck">🃏 {deckCountB}</span>
 		</div>
 
@@ -273,7 +313,7 @@
 		</div>
 	</section>
 
-	<!-- CENTER ZONE (moved to component) -->
+	<!-- CENTER ZONE -->
 	<CenterPanel
 		playerA={playerIdA}
 		playerB={playerIdB}
@@ -293,7 +333,7 @@
 	<section class="zone player">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdA}</span>
-			<span class="pill hp">❤️ {displayedHpA}</span>
+			<span class="pill hp" bind:this={myHpPill}>❤️ {displayedHpA}</span>
 			<span class="pill deck">🃏 {deckCountA}</span>
 		</div>
 
@@ -324,7 +364,7 @@
 							class="card-socket focus:outline-none"
 							style={`width:${cardWidthCss}; --i:${i}; --n:${handItems.length}`}
 							title={`Play ${it.code}`}
-							on:click={() => onPlayCard(it.code)}
+							on:click={(e) => playWithFx(e, it.code)}
 						>
 							<div class="flip-wrap" data-cycle={flipCycle}>
 								<div
@@ -365,3 +405,6 @@
 		</div>
 	</section>
 </div>
+
+<!-- overlay runs once at root -->
+<PlayFXOverlay />
