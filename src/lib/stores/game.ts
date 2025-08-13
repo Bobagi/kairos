@@ -1,10 +1,16 @@
 import { writable } from 'svelte/store';
 
-/** A single card in hand or deck */
+/** Full metadata for a card used by the UI. */
 export interface Card {
 	code: string;
-	image: string;
-	// you can add other fields here (damage, heal, etc.)
+	name: string;
+	description: string;
+	image: string; // keep this for backwards-compat (maps to imageUrl)
+	damage: number;
+	heal: number;
+	fire: number;
+	might: number;
+	magic: number;
 }
 
 /** The shape returned by GET /game/state/:id */
@@ -15,11 +21,8 @@ export interface GameState {
 	lastActivity: number;
 	winner: string | null;
 	hp: Record<string, number>;
-	hands: Record<string, string[]>; // now dynamic: hands['alice'] is string[]
-	// you can add other fields here, e.g.:
-	// hp: Record<string, number>;
-	// decks: Record<string, string[]>;
-	// log: string[];
+	hands: Record<string, string[]>; // hand of a player is an array of card 'code's
+	// (you can add decks/log here if your API returns them)
 }
 
 /** Our Svelte store: either the current GameState or null if not loaded */
