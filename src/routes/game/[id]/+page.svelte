@@ -104,9 +104,7 @@
 			const remote =
 				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
 			if (remote) frameOverlayUrl = remote;
-		} catch {
-			/* ignore */
-		}
+		} catch {}
 	}
 
 	// guardamos último HP/Deck conhecidos para exibir quando a partida terminar
@@ -145,13 +143,12 @@
 				return;
 			}
 		} catch {
-			/* try result */
+			/* tenta resultado abaixo */
 		}
-
 		try {
 			const result = await getGameResult(gameId);
 			finalResult = result;
-			// mantemos o último estado conhecido de HP/Deck na UI
+			// mantém últimos HP/Deck conhecidos para a UI
 		} catch {
 			errorMessage = 'Could not load game state';
 		}
@@ -195,14 +192,21 @@
 		? $game!.hands[playerIdB].length
 		: lastOppHandCount;
 
+	// fim por falta de cartas?
+	$: endedDueToNoCards =
+		Array.isArray(finalResult?.log) && finalResult!.log.some((l) => /no cards/i.test(l));
+
+	// HP exibido após o fim: clamp perdedor -> 0 (exceto fim por deck)
+	$: visHpA = !finalResult || endedDueToNoCards ? hpA : finalResult.winner === playerIdB ? 0 : hpA;
+	$: visHpB = !finalResult || endedDueToNoCards ? hpB : finalResult.winner === playerIdA ? 0 : hpB;
+
 	function handleFlipEnd(uid: string) {
 		pendingReveal.delete(uid);
 	}
 
-	// ---------- log: classificação por cor ----------
+	// ---------- log: classificação por cor (autor, não alvo) ----------
 	function classifyLog(line: string): 'me' | 'opp' | 'sys' {
 		const s = line.trim();
-
 		// Player <Name> played ...
 		const m = /^Player\s+(.+?)\s+played/i.exec(s);
 		if (m) {
@@ -210,12 +214,8 @@
 			const me = (playerIdA ?? '').toLowerCase();
 			return actor === me ? 'me' : 'opp';
 		}
-
-		// BOT played ...
-		if (/^bot\s+played/i.test(s)) return 'opp';
-
-		// Qualquer outra coisa (draw, "Game started", etc.)
-		return 'sys';
+		if (/^bot\s+played/i.test(s)) return 'opp'; // BOT jogou
+		return 'sys'; // draws, start, etc.
 	}
 
 	// ---------- leque dinâmico (usa toda a largura) ----------
@@ -225,8 +225,7 @@
 	function computeSpread() {
 		const n = Math.max(1, handItems.length);
 		const w = myHandEl?.clientWidth ?? 0;
-		// abre mais quando há espaço; limites de segurança
-		const spread = Math.min(42, Math.max(10, (w / n) * 0.22));
+		const spread = Math.min(46, Math.max(10, (w / n) * 0.24));
 		mySpreadPx = spread;
 	}
 	function setupHandResize() {
@@ -241,7 +240,7 @@
 	<section class="zone opponent">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdB}</span>
-			<span class="pill hp">❤️ {hpB}</span>
+			<span class="pill hp">❤️ {visHpB}</span>
 			<span class="pill deck">🃏 {deckCountB}</span>
 		</div>
 
@@ -284,14 +283,14 @@
 		<div class="status-pill">
 			<div class="side">
 				<span class="tag">👤</span><span class="who">{playerIdA}</span><span class="sep">•</span>
-				<span class="tag">❤️</span>{hpA}<span class="sep">•</span><span class="tag">🃏</span
-				>{deckCountA}
+				<span class="tag">❤️</span>{visHpA}
+				<span class="sep">•</span><span class="tag">🃏</span>{deckCountA}
 			</div>
 			<div class="vs">VS</div>
 			<div class="side">
 				<span class="tag">👤</span><span class="who">{playerIdB}</span><span class="sep">•</span>
-				<span class="tag">❤️</span>{hpB}<span class="sep">•</span><span class="tag">🃏</span
-				>{deckCountB}
+				<span class="tag">❤️</span>{visHpB}
+				<span class="sep">•</span><span class="tag">🃏</span>{deckCountB}
 			</div>
 		</div>
 
@@ -300,7 +299,9 @@
 				<div class="notice success">
 					<div class="title">Game finished</div>
 					{#if finalResult.winner === null}
-						<div class="msg">Tie game.</div>
+						<div class="msg">
+							Tie game{endedDueToNoCards ? ' — both players ran out of cards' : ''}.
+						</div>
 					{:else}
 						<div class="msg">Winner: {finalResult.winner}</div>
 					{/if}
@@ -341,7 +342,7 @@
 	<section class="zone player">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdA}</span>
-			<span class="pill hp">❤️ {hpA}</span>
+			<span class="pill hp">❤️ {visHpA}</span>
 			<span class="pill deck">🃏 {deckCountA}</span>
 		</div>
 
@@ -536,7 +537,7 @@
 		z-index: calc(100 + (var(--n) - var(--i)));
 	}
 
-	/* hover levanta e traz para frente (minha mão) */
+	/* hover levanta e traz pra frente (minha mão) */
 	.my-hand.fan .card-socket:hover,
 	.my-hand.fan .card-socket:focus-visible {
 		transform: translate(-50%, -50%) translateX(calc(var(--spread) * var(--offset)))
@@ -618,7 +619,7 @@
 
 	.btn {
 		background: #b07500;
-		color: white;
+		color: #fff;
 		border-radius: 8px;
 		padding: 6px 10px;
 	}
@@ -670,6 +671,7 @@
 	.logline.sys {
 		color: #e7f2f3;
 	}
+
 	/* -------- FLIP -------- */
 	.flip-wrap {
 		position: relative;
@@ -683,13 +685,11 @@
 		transform-style: preserve-3d;
 		border-radius: 10px;
 		overflow: visible;
-		/* sem animação = frente visível */
-		transform: rotateY(0deg);
+		transform: rotateY(0deg); /* default frente */
 	}
 	.flipper.start-back {
-		/* novas cartas começam viradas pro verso */
 		transform: rotateY(180deg);
-	}
+	} /* novas começam no verso */
 	.face {
 		position: absolute;
 		inset: 0;
