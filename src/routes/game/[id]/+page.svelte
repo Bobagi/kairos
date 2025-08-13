@@ -2,10 +2,11 @@
 	import { page } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
+	import CenterPanel from '$lib/components/CenterPanel.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
 	import { game, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
-	/* ===== CSS externos (globais para esta rota) ===== */
+	/* ===== global CSS for this route ===== */
 	import './board.css';
 	import './flip.css';
 	import './hands.css';
@@ -22,13 +23,13 @@
 	let errorMessage: string | null = null;
 	let finalResult: { winner: string | null; log: string[] } | null = null;
 
-	// rota
+	// route param
 	$: gameId = $page.params.id;
 
-	// cartas – largura responsiva compartilhada por deck/mão
+	// shared responsive width for cards (deck and hand)
 	const cardWidthCss = 'clamp(104px, 17.5vw, 200px)';
 
-	// ---------- mão com UIDs + flip ----------
+	// ---------- hand items with stable UIDs + flip ----------
 	type HandItem = { code: string; uid: string };
 	let handItems: HandItem[] = [];
 	const pendingReveal = new Set<string>();
@@ -47,6 +48,7 @@
 		const n = old.length,
 			m = nw.length;
 		const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+
 		for (let i = n - 1; i >= 0; i--)
 			for (let j = m - 1; j >= 0; j--)
 				dp[i][j] = old[i] === nw[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -113,7 +115,7 @@
 		} catch {}
 	}
 
-	// guardamos último HP/Deck conhecidos para exibir quando a partida terminar
+	// Keep last known values to show after the game ends
 	let lastHpA = 0,
 		lastHpB = 0,
 		lastDeckA = 0,
@@ -149,12 +151,11 @@
 				return;
 			}
 		} catch {
-			/* tenta resultado abaixo */
+			/* fall through and try result */
 		}
 		try {
 			const result = await getGameResult(gameId);
-			finalResult = result;
-			// mantém últimos HP/Deck conhecidos para a UI
+			finalResult = result; // show last-known values with winner banner
 		} catch {
 			errorMessage = 'Could not load game state';
 		}
@@ -181,11 +182,11 @@
 		setupHandResize();
 	});
 
-	// ---------- reativos ----------
+	// ---------- derived values ----------
 	$: playerIdA = $game?.players?.[0] ?? 'playerA';
 	$: playerIdB = $game?.players?.[1] ?? 'playerB';
 
-	// exibimos valores do estado atual OU o último conhecido
+	// current or last-known values
 	$: hpA = $game?.hp?.[playerIdA] ?? lastHpA;
 	$: hpB = $game?.hp?.[playerIdB] ?? lastHpB;
 	$: deckCountA = Array.isArray($game?.decks?.[playerIdA])
@@ -198,33 +199,21 @@
 		? $game!.hands[playerIdB].length
 		: lastOppHandCount;
 
-	// fim por falta de cartas?
+	// Did the game end due to no cards?
 	$: endedDueToNoCards =
 		Array.isArray(finalResult?.log) && finalResult!.log.some((l) => /no cards/i.test(l));
 
-	// HP exibido após o fim: clamp perdedor -> 0 (exceto fim por deck)
-	$: visHpA = !finalResult || endedDueToNoCards ? hpA : finalResult.winner === playerIdB ? 0 : hpA;
-	$: visHpB = !finalResult || endedDueToNoCards ? hpB : finalResult.winner === playerIdA ? 0 : hpB;
+	// After finish: clamp losing HP to 0 (except when ended due to no cards)
+	$: displayedHpA =
+		!finalResult || endedDueToNoCards ? hpA : finalResult.winner === playerIdB ? 0 : hpA;
+	$: displayedHpB =
+		!finalResult || endedDueToNoCards ? hpB : finalResult.winner === playerIdA ? 0 : hpB;
 
 	function handleFlipEnd(uid: string) {
 		pendingReveal.delete(uid);
 	}
 
-	// ---------- log: classificação por cor (autor, não alvo) ----------
-	function classifyLog(line: string): 'me' | 'opp' | 'sys' {
-		const s = line.trim();
-		// Player <Name> played ...
-		const m = /^Player\s+(.+?)\s+played/i.exec(s);
-		if (m) {
-			const actor = m[1].toLowerCase();
-			const me = (playerIdA ?? '').toLowerCase();
-			return actor === me ? 'me' : 'opp';
-		}
-		if (/^bot\s+played/i.test(s)) return 'opp'; // BOT jogou
-		return 'sys'; // draws, start, etc.
-	}
-
-	// ---------- leque dinâmico (usa toda a largura) ----------
+	// ---------- fan layout (auto spread to fill available width) ----------
 	let myHandEl: HTMLDivElement | null = null;
 	let mySpreadPx: number | null = null;
 
@@ -238,15 +227,15 @@
 		const ro = new ResizeObserver(() => computeSpread());
 		if (myHandEl) ro.observe(myHandEl);
 	}
-	$: computeSpread(); // recalcula quando a mão muda
+	$: computeSpread(); // recompute whenever the hand changes
 </script>
 
 <div class="board">
-	<!-- ZONA OPONENTE -->
+	<!-- OPPONENT ZONE -->
 	<section class="zone opponent">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdB}</span>
-			<span class="pill hp">❤️ {visHpB}</span>
+			<span class="pill hp">❤️ {displayedHpB}</span>
 			<span class="pill deck">🃏 {deckCountB}</span>
 		</div>
 
@@ -284,71 +273,27 @@
 		</div>
 	</section>
 
-	<!-- ZONA CENTRAL -->
-	<section class="zone center">
-		<div class="status-pill">
-			<div class="side">
-				<span class="tag">👤</span><span class="who">{playerIdA}</span><span class="sep">•</span>
-				<span class="tag">❤️</span>{visHpA}
-				<span class="sep">•</span><span class="tag">🃏</span>{deckCountA}
-			</div>
-			<div class="vs">VS</div>
-			<div class="side">
-				<span class="tag">👤</span><span class="who">{playerIdB}</span><span class="sep">•</span>
-				<span class="tag">❤️</span>{visHpB}
-				<span class="sep">•</span><span class="tag">🃏</span>{deckCountB}
-			</div>
-		</div>
+	<!-- CENTER ZONE (moved to component) -->
+	<CenterPanel
+		playerA={playerIdA}
+		playerB={playerIdB}
+		hpA={displayedHpA}
+		hpB={displayedHpB}
+		deckA={deckCountA}
+		deckB={deckCountB}
+		{finalResult}
+		{endedDueToNoCards}
+		{errorMessage}
+		log={$game?.log}
+		onRefresh={loadStateOrResult}
+		{onSkipTurn}
+	/>
 
-		<div class="center-right">
-			{#if finalResult}
-				<div class="notice success">
-					<div class="title">Game finished</div>
-					{#if finalResult.winner === null}
-						<div class="msg">
-							Tie game{endedDueToNoCards ? ' — both players ran out of cards' : ''}.
-						</div>
-					{:else}
-						<div class="msg">Winner: {finalResult.winner}</div>
-					{/if}
-					<div class="actions">
-						<a class="btn" href="/">Back to home</a>
-						<button class="btn ghost" on:click={loadStateOrResult}>Refresh</button>
-					</div>
-				</div>
-			{/if}
-
-			{#if !finalResult && errorMessage}
-				<div class="notice error">
-					<div class="title">Network issue</div>
-					<div class="msg">{errorMessage}</div>
-					<button class="btn" on:click={loadStateOrResult}>Try again</button>
-				</div>
-			{/if}
-
-			{#if handItems.length === 0 && !finalResult}
-				<div class="notice warn">
-					<div class="title">No cards in hand</div>
-					<div class="msg">Draw or skip your turn.</div>
-					<button class="btn" on:click={onSkipTurn}>Skip turn</button>
-				</div>
-			{/if}
-
-			{#if Array.isArray($game?.log)}
-				<div class="logbox">
-					{#each $game.log as line}
-						<div class={`logline ${classifyLog(line)}`}>{line}</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	</section>
-
-	<!-- ZONA JOGADOR -->
+	<!-- PLAYER ZONE -->
 	<section class="zone player">
 		<div class="zone-header">
 			<span class="name">👤 {playerIdA}</span>
-			<span class="pill hp">❤️ {visHpA}</span>
+			<span class="pill hp">❤️ {displayedHpA}</span>
 			<span class="pill deck">🃏 {deckCountA}</span>
 		</div>
 
