@@ -40,8 +40,8 @@
 	{#each layers as i (i)}
 		<div
 			style="
-        position:absolute; inset:0; border-radius:10px;
-        overflow:visible; pointer-events:none;
+        position:absolute; inset:0;
+        overflow:visible; pointer-events:none;height:96%;
         transform: translate({dir * i * offsetXPx}px, {i * offsetYPx}px);
         z-index:{i};
         filter: drop-shadow(0 2px 10px rgba(0,0,0,.35));
