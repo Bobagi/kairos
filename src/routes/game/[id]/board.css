@@ -1,0 +1,19 @@
+html,
+body {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: radial-gradient(ellipse at center, #0b2a2e 0%, #0a1d20 70%, #071418 100%);
+	color-scheme: dark;
+}
+
+.board {
+	max-width: 1200px;
+	margin: 16px auto;
+	display: grid;
+	grid-template-rows: auto auto auto;
+	gap: 14px;
+	padding: 10px 14px;
+}
