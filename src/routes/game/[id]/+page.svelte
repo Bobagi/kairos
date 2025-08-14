@@ -1,15 +1,14 @@
 <!-- src/routes/game/[id]/+page.svelte -->
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page as sveltePageStore } from '$app/stores';
 	import { getGameResult, getGameState, playCard, skipTurn } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import CenterPanel from '$lib/components/CenterPanel.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
 	import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
-	import { fx } from '$lib/stores/fx';
-	import { game, type GameState } from '$lib/stores/game';
+	import { fx as visualEffectsStore } from '$lib/stores/fx';
+	import { game as gameStateStore, type GameState } from '$lib/stores/game';
 	import { onMount } from 'svelte';
-	/* ===== global CSS for this route ===== */
 	import './board.css';
 	import './flip.css';
 	import './hands.css';
@@ -17,81 +16,73 @@
 	import './notices.css';
 	import './zones.css';
 
-	// overlays
-	let frameOverlayUrl: string | null = '/frames/default.png';
-	const titleOverlayUrl = '/frames/title.png';
+	let frameOverlayImageUrl: string | null = '/frames/default.png';
+	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
 
-	// UI state
-	let errorMessage: string | null = null;
-	let finalResult: { winner: string | null; log: string[] } | null = null;
+	let errorMessageText: string | null = null;
+	let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
-	// route param
-	$: gameId = $page.params.id;
+	$: currentGameId = $sveltePageStore.params.id;
 
-	// shared responsive width for cards (deck and hand)
-	const cardWidthCss = 'clamp(104px, 17.5vw, 200px)';
+	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
-	// ---------- hand items with stable UIDs + flip ----------
-	type HandItem = { code: string; uid: string };
-	let handItems: HandItem[] = [];
-	const pendingReveal = new Set<string>();
-	let flipCycle = 0;
+	type HandCardItem = { code: string; uid: string };
+	let playerHandCardItems: HandCardItem[] = [];
+	const pendingCardRevealUidSet = new Set<string>();
+	let autoFlipCycleCounter = 0;
 
-	function makeUid() {
+	function generateStableUid() {
 		return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 	}
 
-	function reconcileHand(
-		prev: HandItem[],
-		codes: string[]
-	): { items: HandItem[]; created: string[] } {
-		const old = prev.map((p) => p.code);
-		const nw = codes;
-		const n = old.length,
-			m = nw.length;
+	function reconcileHandItemsKeepingStableUids(
+		previousItems: HandCardItem[],
+		nextCodes: string[]
+	): { items: HandCardItem[]; created: string[] } {
+		const oldCodes = previousItems.map((p) => p.code);
+		const newCodes = nextCodes;
+		const n = oldCodes.length;
+		const m = newCodes.length;
 		const dp = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
-
 		for (let i = n - 1; i >= 0; i--)
 			for (let j = m - 1; j >= 0; j--)
-				dp[i][j] = old[i] === nw[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
-
-		const map = new Map<number, number>();
+				dp[i][j] =
+					oldCodes[i] === newCodes[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+		const indexMap = new Map<number, number>();
 		let i = 0,
 			j = 0;
 		while (i < n && j < m) {
-			if (old[i] === nw[j]) {
-				map.set(i, j);
+			if (oldCodes[i] === newCodes[j]) {
+				indexMap.set(i, j);
 				i++;
 				j++;
 			} else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
 			else j++;
 		}
-
-		const used = new Set<number>();
-		const created: string[] = [];
-		const items: HandItem[] = [];
-		for (let nj = 0; nj < m; nj++) {
+		const usedOldIndexes = new Set<number>();
+		const createdUids: string[] = [];
+		const reconciledItems: HandCardItem[] = [];
+		for (let newIndex = 0; newIndex < m; newIndex++) {
 			let reused = false;
-			for (const [oi, mj] of map) {
-				if (mj === nj && !used.has(oi)) {
-					items.push(prev[oi]);
-					used.add(oi);
+			for (const [oldIndex, mappedNewIndex] of indexMap) {
+				if (mappedNewIndex === newIndex && !usedOldIndexes.has(oldIndex)) {
+					reconciledItems.push(previousItems[oldIndex]);
+					usedOldIndexes.add(oldIndex);
 					reused = true;
 					break;
 				}
 			}
 			if (!reused) {
-				const uid = makeUid();
-				items.push({ code: nw[nj], uid });
-				created.push(uid);
+				const uid = generateStableUid();
+				reconciledItems.push({ code: newCodes[newIndex], uid });
+				createdUids.push(uid);
 			}
 		}
-		return { items, created };
+		return { items: reconciledItems, created: createdUids };
 	}
 
-	// ---------- helpers ----------
-	function filenameForCard(code: string): string {
+	function resolveCardArtFilenameForCode(code: string): string {
 		if (code.includes('-')) return `${code}.png`;
 		switch (code) {
 			case 'fireball':
@@ -104,140 +95,142 @@
 				return `${code}.png`;
 		}
 	}
-	function imageUrlForCard(code: string): string {
-		return `https://bobagi.click/images/cards/${filenameForCard(code)}`;
+	function buildCardArtImageUrlForCode(code: string): string {
+		return `https://bobagi.click/images/cards/${resolveCardArtFilenameForCode(code)}`;
 	}
 
-	async function loadTemplatesOnce() {
+	async function fetchAndApplyRemoteFrameTemplateIfAvailable() {
 		try {
-			const res = await fetch('/game/templates');
-			const templates = (await res.json()) as Array<{ frameUrl?: string }>;
+			const response = await fetch('/game/templates');
+			const templates = (await response.json()) as Array<{ frameUrl?: string }>;
 			const remote =
 				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
-			if (remote) frameOverlayUrl = remote;
+			if (remote) frameOverlayImageUrl = remote;
 		} catch {}
 	}
 
-	// Keep last known values to show after the game ends
-	let lastHpA = 0,
-		lastHpB = 0,
-		lastDeckA = 0,
-		lastDeckB = 0,
-		lastOppHandCount = 0;
+	let lastKnownHpForPlayerA = 0;
+	let lastKnownHpForPlayerB = 0;
+	let lastKnownDeckCountForPlayerA = 0;
+	let lastKnownDeckCountForPlayerB = 0;
+	let lastKnownOpponentHandCount = 0;
 
-	async function loadStateOrResult() {
-		errorMessage = null;
+	async function loadGameStateOrFinalResult() {
+		errorMessageText = null;
 		try {
-			const state = (await getGameState(gameId)) as GameState | null;
+			const state = (await getGameState(currentGameId)) as GameState | null;
 			if (state && typeof state === 'object') {
-				finalResult = null;
-				game.set(state);
-
-				const aId = state.players[0];
-				const bId = state.players[1];
-
-				lastHpA = state.hp?.[aId] ?? lastHpA;
-				lastHpB = state.hp?.[bId] ?? lastHpB;
-				lastDeckA = Array.isArray(state.decks?.[aId]) ? state.decks[aId].length : lastDeckA;
-				lastDeckB = Array.isArray(state.decks?.[bId]) ? state.decks[bId].length : lastDeckB;
-				lastOppHandCount = Array.isArray(state.hands?.[bId])
-					? state.hands[bId].length
-					: lastOppHandCount;
-
-				const codes = Array.isArray(state.hands?.[aId]) ? (state.hands[aId] as string[]) : [];
-				const { items, created } = reconcileHand(handItems, codes);
-				handItems = items;
+				finalGameResult = null;
+				gameStateStore.set(state);
+				const playerAId = state.players[0];
+				const playerBId = state.players[1];
+				lastKnownHpForPlayerA = state.hp?.[playerAId] ?? lastKnownHpForPlayerA;
+				lastKnownHpForPlayerB = state.hp?.[playerBId] ?? lastKnownHpForPlayerB;
+				lastKnownDeckCountForPlayerA = Array.isArray(state.decks?.[playerAId])
+					? state.decks[playerAId].length
+					: lastKnownDeckCountForPlayerA;
+				lastKnownDeckCountForPlayerB = Array.isArray(state.decks?.[playerBId])
+					? state.decks[playerBId].length
+					: lastKnownDeckCountForPlayerB;
+				lastKnownOpponentHandCount = Array.isArray(state.hands?.[playerBId])
+					? state.hands[playerBId].length
+					: lastKnownOpponentHandCount;
+				const codes = Array.isArray(state.hands?.[playerAId])
+					? (state.hands[playerAId] as string[])
+					: [];
+				const { items, created } = reconcileHandItemsKeepingStableUids(playerHandCardItems, codes);
+				playerHandCardItems = items;
 				if (created.length) {
-					created.forEach((u) => pendingReveal.add(u));
-					flipCycle++;
+					created.forEach((u) => pendingCardRevealUidSet.add(u));
+					autoFlipCycleCounter++;
 				}
 				return;
 			}
-		} catch {
-			/* fall through and try result */
-		}
+		} catch {}
 		try {
-			const result = await getGameResult(gameId);
-			finalResult = result; // show last-known values with winner banner
+			const result = await getGameResult(currentGameId);
+			finalGameResult = result;
 		} catch {
-			errorMessage = 'Could not load game state';
+			errorMessageText = 'Could not load game state';
 		}
 	}
 
-	async function onPlayCard(cardCode: string) {
-		const aId = $game?.players?.[0] ?? 'playerA';
+	async function handlePlayCardAction(cardCode: string) {
+		const playerAId = $gameStateStore?.players?.[0] ?? 'playerA';
 		try {
-			await playCard(gameId, aId, cardCode);
+			await playCard(currentGameId, playerAId, cardCode);
 		} catch {}
-		await loadStateOrResult();
+		await loadGameStateOrFinalResult();
 	}
-	async function onSkipTurn() {
-		const aId = $game?.players?.[0] ?? 'playerA';
+	async function handleSkipTurnAction() {
+		const playerAId = $gameStateStore?.players?.[0] ?? 'playerA';
 		try {
-			await skipTurn(gameId, aId);
+			await skipTurn(currentGameId, playerAId);
 		} catch {}
-		await loadStateOrResult();
+		await loadGameStateOrFinalResult();
 	}
 
 	onMount(async () => {
-		await loadTemplatesOnce();
-		await loadStateOrResult();
-		setupHandResize();
+		await fetchAndApplyRemoteFrameTemplateIfAvailable();
+		await loadGameStateOrFinalResult();
+		setupMyHandResizeObserver();
 	});
 
-	// ---------- derived values ----------
-	$: playerIdA = $game?.players?.[0] ?? 'playerA';
-	$: playerIdB = $game?.players?.[1] ?? 'playerB';
+	$: playerIdPlayerA = $gameStateStore?.players?.[0] ?? 'playerA';
+	$: playerIdPlayerB = $gameStateStore?.players?.[1] ?? 'playerB';
 
-	// current or last-known values
-	$: hpA = $game?.hp?.[playerIdA] ?? lastHpA;
-	$: hpB = $game?.hp?.[playerIdB] ?? lastHpB;
-	$: deckCountA = Array.isArray($game?.decks?.[playerIdA])
-		? $game!.decks[playerIdA].length
-		: lastDeckA;
-	$: deckCountB = Array.isArray($game?.decks?.[playerIdB])
-		? $game!.decks[playerIdB].length
-		: lastDeckB;
-	$: oppHandCount = Array.isArray($game?.hands?.[playerIdB])
-		? $game!.hands[playerIdB].length
-		: lastOppHandCount;
+	$: currentHpForPlayerA = $gameStateStore?.hp?.[playerIdPlayerA] ?? lastKnownHpForPlayerA;
+	$: currentHpForPlayerB = $gameStateStore?.hp?.[playerIdPlayerB] ?? lastKnownHpForPlayerB;
+	$: currentDeckCountForPlayerA = Array.isArray($gameStateStore?.decks?.[playerIdPlayerA])
+		? $gameStateStore!.decks[playerIdPlayerA].length
+		: lastKnownDeckCountForPlayerA;
+	$: currentDeckCountForPlayerB = Array.isArray($gameStateStore?.decks?.[playerIdPlayerB])
+		? $gameStateStore!.decks[playerIdPlayerB].length
+		: lastKnownDeckCountForPlayerB;
+	$: currentOpponentHandCount = Array.isArray($gameStateStore?.hands?.[playerIdPlayerB])
+		? $gameStateStore!.hands[playerIdPlayerB].length
+		: lastKnownOpponentHandCount;
 
-	// Did the game end due to no cards?
-	$: endedDueToNoCards =
-		Array.isArray(finalResult?.log) && finalResult!.log.some((l) => /no cards/i.test(l));
+	$: gameEndedDueToNoCards =
+		Array.isArray(finalGameResult?.log) && finalGameResult!.log.some((l) => /no cards/i.test(l));
 
-	// After finish: clamp losing HP to 0 (except when ended due to no cards)
-	$: displayedHpA =
-		!finalResult || endedDueToNoCards ? hpA : finalResult.winner === playerIdB ? 0 : hpA;
-	$: displayedHpB =
-		!finalResult || endedDueToNoCards ? hpB : finalResult.winner === playerIdA ? 0 : hpB;
+	$: displayedHpForPlayerA =
+		!finalGameResult || gameEndedDueToNoCards
+			? currentHpForPlayerA
+			: finalGameResult.winner === playerIdPlayerB
+				? 0
+				: currentHpForPlayerA;
+	$: displayedHpForPlayerB =
+		!finalGameResult || gameEndedDueToNoCards
+			? currentHpForPlayerB
+			: finalGameResult.winner === playerIdPlayerA
+				? 0
+				: currentHpForPlayerB;
 
-	function handleFlipEnd(uid: string) {
-		pendingReveal.delete(uid);
+	function handleFlipAnimationEndForUid(uid: string) {
+		pendingCardRevealUidSet.delete(uid);
 	}
 
-	// ---------- fan layout (auto spread to fill available width) ----------
-	let myHandEl: HTMLDivElement | null = null;
-	let mySpreadPx: number | null = null;
+	let myHandContainerElement: HTMLDivElement | null = null;
+	let myHandCardSpreadPixels: number | null = null;
 
-	function computeSpread() {
-		const n = Math.max(1, handItems.length);
-		const w = myHandEl?.clientWidth ?? 0;
-		const spread = Math.min(46, Math.max(10, (w / n) * 0.24));
-		mySpreadPx = spread;
+	function computeMyHandCardSpreadPixels() {
+		const count = Math.max(1, playerHandCardItems.length);
+		const containerWidth = myHandContainerElement?.clientWidth ?? 0;
+		const spread = Math.min(46, Math.max(10, (containerWidth / count) * 0.24));
+		myHandCardSpreadPixels = spread;
 	}
-	function setupHandResize() {
-		const ro = new ResizeObserver(() => computeSpread());
-		if (myHandEl) ro.observe(myHandEl);
+	function setupMyHandResizeObserver() {
+		const ro = new ResizeObserver(() => computeMyHandCardSpreadPixels());
+		if (myHandContainerElement) ro.observe(myHandContainerElement);
 	}
-	$: computeSpread(); // recompute whenever the hand changes
+	$: computeMyHandCardSpreadPixels();
 
-	// ---------- FX wiring ----------
-	let oppHpPill: HTMLSpanElement | null = null;
-	let myHpPill: HTMLSpanElement | null = null;
+	let opponentHpPillElement: HTMLSpanElement | null = null;
+	let myHpPillElement: HTMLSpanElement | null = null;
 
-	type FxMap = { kind: 'damage' | 'heal'; amount: number; target: 'opp' | 'me' };
-	function cardEffect(code: string): FxMap {
+	type CardEffectDescriptor = { kind: 'damage' | 'heal'; amount: number; target: 'opp' | 'me' };
+	function getCardEffectDescriptorForCode(code: string): CardEffectDescriptor {
 		switch (code) {
 			case 'lightning':
 				return { kind: 'damage', amount: 3, target: 'opp' };
@@ -250,43 +243,41 @@
 		}
 	}
 
-	function playWithFx(e: MouseEvent, code: string) {
+	function playCardWithVisualEffects(e: MouseEvent, code: string) {
 		const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		const { kind, amount, target } = cardEffect(code);
-		const targetEl = target === 'opp' ? oppHpPill : myHpPill;
-		if (targetEl) {
-			const targetRect = targetEl.getBoundingClientRect();
-			fx.start({
+		const { kind, amount, target } = getCardEffectDescriptorForCode(code);
+		const targetElement = target === 'opp' ? opponentHpPillElement : myHpPillElement;
+		if (targetElement) {
+			const targetRect = targetElement.getBoundingClientRect();
+			visualEffectsStore.start({
 				fromRect,
 				targetRect,
-				imgUrl: imageUrlForCard(code),
-				frameUrl: frameOverlayUrl,
+				imgUrl: buildCardArtImageUrlForCode(code),
+				frameUrl: frameOverlayImageUrl,
 				kind,
 				amount
 			});
 		}
-		// trigger the real play
-		onPlayCard(code);
+		handlePlayCardAction(code);
 	}
 </script>
 
 <div class="board">
-	<!-- OPPONENT ZONE -->
 	<section class="zone opponent">
 		<div class="zone-header">
-			<span class="name">👤 {playerIdB}</span>
-			<span class="pill hp" bind:this={oppHpPill}>❤️ {displayedHpB}</span>
-			<span class="pill deck">🃏 {deckCountB}</span>
+			<span class="name">👤 {playerIdPlayerB}</span>
+			<span class="pill hp" bind:this={opponentHpPillElement}>❤️ {displayedHpForPlayerB}</span>
+			<span class="pill deck">🃏 {currentDeckCountForPlayerB}</span>
 		</div>
 
 		<div class="zone-row two-cols">
 			<div class="deck-col">
 				<DeckStack
-					deckCount={deckCountB}
+					deckCount={currentDeckCountForPlayerB}
 					cardBackImageUrl="/frames/card-back.png"
 					aspectWidth={430}
 					aspectHeight={670}
-					{cardWidthCss}
+					cardWidthCss={cardWidthCssValue}
 					maxVisible={7}
 					offsetXPx={4}
 					offsetYPx={3}
@@ -295,8 +286,11 @@
 			</div>
 
 			<div class="hand opp-hand fan">
-				{#each Array.from({ length: oppHandCount }) as _, i}
-					<div class="card-socket" style={`width:${cardWidthCss}; --i:${i}; --n:${oppHandCount}`}>
+				{#each Array.from({ length: currentOpponentHandCount }) as _, i}
+					<div
+						class="card-socket"
+						style={`width:${cardWidthCssValue}; --i:${i}; --n:${currentOpponentHandCount}`}
+					>
 						<div class="card-back-wrap" title="Opponent card">
 							<img
 								src="/frames/card-back.png"
@@ -313,38 +307,36 @@
 		</div>
 	</section>
 
-	<!-- CENTER ZONE -->
 	<CenterPanel
-		playerA={playerIdA}
-		playerB={playerIdB}
-		hpA={displayedHpA}
-		hpB={displayedHpB}
-		deckA={deckCountA}
-		deckB={deckCountB}
-		{finalResult}
-		{endedDueToNoCards}
-		{errorMessage}
-		log={$game?.log}
-		onRefresh={loadStateOrResult}
-		{onSkipTurn}
+		playerA={playerIdPlayerA}
+		playerB={playerIdPlayerB}
+		hpA={displayedHpForPlayerA}
+		hpB={displayedHpForPlayerB}
+		deckA={currentDeckCountForPlayerA}
+		deckB={currentDeckCountForPlayerB}
+		finalResult={finalGameResult}
+		endedDueToNoCards={gameEndedDueToNoCards}
+		errorMessage={errorMessageText}
+		log={$gameStateStore?.log}
+		onRefresh={loadGameStateOrFinalResult}
+		onSkipTurn={handleSkipTurnAction}
 	/>
 
-	<!-- PLAYER ZONE -->
 	<section class="zone player">
 		<div class="zone-header">
-			<span class="name">👤 {playerIdA}</span>
-			<span class="pill hp" bind:this={myHpPill}>❤️ {displayedHpA}</span>
-			<span class="pill deck">🃏 {deckCountA}</span>
+			<span class="name">👤 {playerIdPlayerA}</span>
+			<span class="pill hp" bind:this={myHpPillElement}>❤️ {displayedHpForPlayerA}</span>
+			<span class="pill deck">🃏 {currentDeckCountForPlayerA}</span>
 		</div>
 
 		<div class="zone-row two-cols">
 			<div class="deck-col">
 				<DeckStack
-					deckCount={deckCountA}
+					deckCount={currentDeckCountForPlayerA}
 					cardBackImageUrl="/frames/card-back.png"
 					aspectWidth={430}
 					aspectHeight={670}
-					{cardWidthCss}
+					cardWidthCss={cardWidthCssValue}
 					maxVisible={7}
 					offsetXPx={4}
 					offsetYPx={3}
@@ -354,31 +346,31 @@
 
 			<div
 				class="hand my-hand fan"
-				bind:this={myHandEl}
-				style={`--spread-override:${mySpreadPx ? mySpreadPx + 'px' : ''}`}
+				bind:this={myHandContainerElement}
+				style={`--spread-override:${myHandCardSpreadPixels ? myHandCardSpreadPixels + 'px' : ''}`}
 			>
-				{#each handItems as it, i (it.uid)}
+				{#each playerHandCardItems as it, i (it.uid)}
 					{#key it.uid}
 						<button
 							type="button"
 							class="card-socket focus:outline-none"
-							style={`width:${cardWidthCss}; --i:${i}; --n:${handItems.length}`}
+							style={`width:${cardWidthCssValue}; --i:${i}; --n:${playerHandCardItems.length}`}
 							title={`Play ${it.code}`}
-							on:click={(e) => playWithFx(e, it.code)}
+							on:click={(e) => playCardWithVisualEffects(e, it.code)}
 						>
-							<div class="flip-wrap" data-cycle={flipCycle}>
+							<div class="flip-wrap" data-cycle={autoFlipCycleCounter}>
 								<div
 									class="flipper"
-									class:animate={pendingReveal.has(it.uid)}
-									class:start-back={pendingReveal.has(it.uid)}
-									on:animationend={() => handleFlipEnd(it.uid)}
+									class:animate={pendingCardRevealUidSet.has(it.uid)}
+									class:start-back={pendingCardRevealUidSet.has(it.uid)}
+									on:animationend={() => handleFlipAnimationEndForUid(it.uid)}
 									style="--flip-ms:700ms;"
 								>
 									<div class="face front">
 										<CardComposite
-											artImageUrl={imageUrlForCard(it.code)}
-											frameImageUrl={frameOverlayUrl ?? '/frames/default.png'}
-											titleImageUrl={titleOverlayUrl}
+											artImageUrl={buildCardArtImageUrlForCode(it.code)}
+											frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
+											titleImageUrl={titleOverlayImageUrl}
 											titleText={it.code}
 											aspectWidth={430}
 											aspectHeight={670}
@@ -406,5 +398,4 @@
 	</section>
 </div>
 
-<!-- overlay runs once at root -->
 <PlayFXOverlay />
