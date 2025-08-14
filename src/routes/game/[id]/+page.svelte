@@ -11,6 +11,7 @@
 	import { onMount } from 'svelte';
 	import './board.css';
 	import './flip.css';
+	import './fonts.css';
 	import './hands.css';
 	import './log.css';
 	import './notices.css';
