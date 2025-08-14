@@ -105,7 +105,17 @@
 	}
 
 	function buildFallbackArtImageUrlForCode(code: string): string {
-		return `https://bobagi.click/images/cards/${code.includes('-') ? `${code}.png` : code === 'fireball' ? 'flamed-leaf.png' : code === 'heal' ? 'remedy.png' : code === 'lightning' ? 'power-lightning.png' : `${code}.png`}`;
+		return `https://bobagi.click/images/cards/${
+			code.includes('-')
+				? `${code}.png`
+				: code === 'fireball'
+					? 'flamed-leaf.png'
+					: code === 'heal'
+						? 'remedy.png'
+						: code === 'lightning'
+							? 'power-lightning.png'
+							: `${code}.png`
+		}`;
 	}
 
 	async function fetchAndApplyRemoteFrameTemplateIfAvailable() {
@@ -158,26 +168,34 @@
 			if (state && typeof state === 'object') {
 				finalGameResult = null;
 				gameStateStore.set(state);
+
 				const playerAId = state.players[0];
 				const playerBId = state.players[1];
+
 				lastKnownHpForPlayerA = state.hp?.[playerAId] ?? lastKnownHpForPlayerA;
 				lastKnownHpForPlayerB = state.hp?.[playerBId] ?? lastKnownHpForPlayerB;
+
 				lastKnownDeckCountForPlayerA = Array.isArray(state.decks?.[playerAId])
 					? state.decks[playerAId].length
 					: lastKnownDeckCountForPlayerA;
 				lastKnownDeckCountForPlayerB = Array.isArray(state.decks?.[playerBId])
 					? state.decks[playerBId].length
 					: lastKnownDeckCountForPlayerB;
+
 				lastKnownOpponentHandCount = Array.isArray(state.hands?.[playerBId])
 					? state.hands[playerBId].length
 					: lastKnownOpponentHandCount;
+
 				const codes = Array.isArray(state.hands?.[playerAId])
 					? (state.hands[playerAId] as string[])
 					: [];
+
 				const { items, created } = reconcileHandItemsKeepingStableUids(playerHandCardItems, codes);
 				playerHandCardItems = items;
+
 				if (codes.length) await fetchCardDetailsByCodes(codes);
 				applyCachedDetailsIntoHandItems();
+
 				if (created.length) {
 					created.forEach((u) => pendingCardRevealUidSet.add(u));
 					autoFlipCycleCounter++;
@@ -200,6 +218,7 @@
 		} catch {}
 		await loadGameStateOrFinalResult();
 	}
+
 	async function handleSkipTurnAction() {
 		const playerAId = $gameStateStore?.players?.[0] ?? 'playerA';
 		try {
@@ -219,12 +238,14 @@
 
 	$: currentHpForPlayerA = $gameStateStore?.hp?.[playerIdPlayerA] ?? lastKnownHpForPlayerA;
 	$: currentHpForPlayerB = $gameStateStore?.hp?.[playerIdPlayerB] ?? lastKnownHpForPlayerB;
+
 	$: currentDeckCountForPlayerA = Array.isArray($gameStateStore?.decks?.[playerIdPlayerA])
 		? $gameStateStore!.decks[playerIdPlayerA].length
 		: lastKnownDeckCountForPlayerA;
 	$: currentDeckCountForPlayerB = Array.isArray($gameStateStore?.decks?.[playerIdPlayerB])
 		? $gameStateStore!.decks[playerIdPlayerB].length
 		: lastKnownDeckCountForPlayerB;
+
 	$: currentOpponentHandCount = Array.isArray($gameStateStore?.hands?.[playerIdPlayerB])
 		? $gameStateStore!.hands[playerIdPlayerB].length
 		: lastKnownOpponentHandCount;
@@ -303,6 +324,24 @@
 		}
 		handlePlayCardAction(code);
 	}
+
+	// ---------- Local fallback to ensure "Skip Turn" is always available when both sides have no cards ----------
+	$: myHandIsEmpty = playerHandCardItems.length === 0;
+	$: myDeckIsEmpty = currentDeckCountForPlayerA === 0;
+	$: oppHandIsEmpty = currentOpponentHandCount === 0;
+	$: oppDeckIsEmpty = currentDeckCountForPlayerB === 0;
+
+	$: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
+	$: isMyTurn =
+		($gameStateStore?.players?.[currentTurnIndex] ?? playerIdPlayerA) === playerIdPlayerA;
+
+	$: shouldShowLocalSkipButton =
+		!finalGameResult &&
+		isMyTurn &&
+		myHandIsEmpty &&
+		myDeckIsEmpty &&
+		oppHandIsEmpty &&
+		oppDeckIsEmpty;
 </script>
 
 <div class="board">
@@ -364,6 +403,16 @@
 		onRefresh={loadGameStateOrFinalResult}
 		onSkipTurn={handleSkipTurnAction}
 	/>
+
+	{#if shouldShowLocalSkipButton}
+		<div
+			class="notice warn"
+			style="margin:10px auto;max-width:560px;display:flex;justify-content:space-between;align-items:center;gap:10px;"
+		>
+			<div class="msg">No cards remaining for either side. You can skip your turn.</div>
+			<button type="button" class="btn" on:click={handleSkipTurnAction}>Skip Turn</button>
+		</div>
+	{/if}
 
 	<section class="zone player">
 		<div class="zone-header">
