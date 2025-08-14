@@ -16,6 +16,16 @@
 	import './notices.css';
 	import './zones.css';
 
+	type CardDetails = {
+		code: string;
+		name: string;
+		description: string;
+		imageUrl: string;
+		might: number;
+		fire: number;
+		magic: number;
+	};
+
 	let frameOverlayImageUrl: string | null = '/frames/default.png';
 	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
@@ -27,10 +37,21 @@
 
 	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
-	type HandCardItem = { code: string; uid: string };
+	type HandCardItem = {
+		code: string;
+		uid: string;
+		name?: string;
+		description?: string;
+		imageUrl?: string;
+		might?: number;
+		fire?: number;
+		magic?: number;
+	};
 	let playerHandCardItems: HandCardItem[] = [];
 	const pendingCardRevealUidSet = new Set<string>();
 	let autoFlipCycleCounter = 0;
+
+	const cardDetailsCacheByCode = new Map<string, CardDetails>();
 
 	function generateStableUid() {
 		return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -82,21 +103,8 @@
 		return { items: reconciledItems, created: createdUids };
 	}
 
-	function resolveCardArtFilenameForCode(code: string): string {
-		if (code.includes('-')) return `${code}.png`;
-		switch (code) {
-			case 'fireball':
-				return 'flamed-leaf.png';
-			case 'heal':
-				return 'remedy.png';
-			case 'lightning':
-				return 'power-lightning.png';
-			default:
-				return `${code}.png`;
-		}
-	}
-	function buildCardArtImageUrlForCode(code: string): string {
-		return `https://bobagi.click/images/cards/${resolveCardArtFilenameForCode(code)}`;
+	function buildFallbackArtImageUrlForCode(code: string): string {
+		return `https://bobagi.click/images/cards/${code.includes('-') ? `${code}.png` : code === 'fireball' ? 'flamed-leaf.png' : code === 'heal' ? 'remedy.png' : code === 'lightning' ? 'power-lightning.png' : `${code}.png`}`;
 	}
 
 	async function fetchAndApplyRemoteFrameTemplateIfAvailable() {
@@ -107,6 +115,33 @@
 				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
 			if (remote) frameOverlayImageUrl = remote;
 		} catch {}
+	}
+
+	async function fetchCardDetailsByCodes(codes: string[]) {
+		const unique = Array.from(new Set(codes.filter((c) => !cardDetailsCacheByCode.has(c))));
+		if (unique.length === 0) return;
+		try {
+			const response = await fetch(`/game/cards?codes=${encodeURIComponent(unique.join(','))}`);
+			const arr = (await response.json()) as CardDetails[];
+			for (const d of arr) cardDetailsCacheByCode.set(d.code, d);
+		} catch {}
+	}
+
+	function applyCachedDetailsIntoHandItems() {
+		playerHandCardItems = playerHandCardItems.map((it) => {
+			const d = cardDetailsCacheByCode.get(it.code);
+			return d
+				? {
+						...it,
+						name: d.name,
+						description: d.description,
+						imageUrl: d.imageUrl,
+						might: d.might,
+						fire: d.fire,
+						magic: d.magic
+					}
+				: it;
+		});
 	}
 
 	let lastKnownHpForPlayerA = 0;
@@ -140,6 +175,8 @@
 					: [];
 				const { items, created } = reconcileHandItemsKeepingStableUids(playerHandCardItems, codes);
 				playerHandCardItems = items;
+				if (codes.length) await fetchCardDetailsByCodes(codes);
+				applyCachedDetailsIntoHandItems();
 				if (created.length) {
 					created.forEach((u) => pendingCardRevealUidSet.add(u));
 					autoFlipCycleCounter++;
@@ -243,6 +280,11 @@
 		}
 	}
 
+	function getArtUrlForEffectsByCode(code: string) {
+		const d = cardDetailsCacheByCode.get(code);
+		return d?.imageUrl ?? buildFallbackArtImageUrlForCode(code);
+	}
+
 	function playCardWithVisualEffects(e: MouseEvent, code: string) {
 		const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		const { kind, amount, target } = getCardEffectDescriptorForCode(code);
@@ -252,7 +294,7 @@
 			visualEffectsStore.start({
 				fromRect,
 				targetRect,
-				imgUrl: buildCardArtImageUrlForCode(code),
+				imgUrl: getArtUrlForEffectsByCode(code),
 				frameUrl: frameOverlayImageUrl,
 				kind,
 				amount
@@ -355,7 +397,7 @@
 							type="button"
 							class="card-socket focus:outline-none"
 							style={`width:${cardWidthCssValue}; --i:${i}; --n:${playerHandCardItems.length}`}
-							title={`Play ${it.code}`}
+							title={`Play ${it.name ?? it.code}`}
 							on:click={(e) => playCardWithVisualEffects(e, it.code)}
 						>
 							<div class="flip-wrap" data-cycle={autoFlipCycleCounter}>
@@ -368,14 +410,18 @@
 								>
 									<div class="face front">
 										<CardComposite
-											artImageUrl={buildCardArtImageUrlForCode(it.code)}
+											artImageUrl={it.imageUrl ?? buildFallbackArtImageUrlForCode(it.code)}
 											frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
 											titleImageUrl={titleOverlayImageUrl}
-											titleText={it.code}
+											titleText={it.name ?? it.code}
 											aspectWidth={430}
 											aspectHeight={670}
 											artObjectFit="cover"
 											enableTilt={true}
+											descriptionText={it.description ?? ''}
+											magicValue={it.magic ?? 0}
+											mightValue={it.might ?? 0}
+											fireValue={it.fire ?? 0}
 										/>
 									</div>
 									<div class="face back">
