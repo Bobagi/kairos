@@ -16,8 +16,8 @@
 	export let maxVisible = 20;
 
 	/** Deslocamento entre camadas (px) */
-	export let offsetXPx = 2;
-	export let offsetYPx = 1;
+	export let offsetXPx = 1;
+	export let offsetYPx = 0.5;
 
 	/** Direção do empilhamento */
 	export let direction: 'right' | 'left' = 'right';

@@ -10,7 +10,7 @@
 	export let artObjectFit: 'cover' | 'contain' = 'cover';
 	export let titleTopPercent = 3;
 	export let titleLeftPercent = 29;
-	export let titleTextTopPercent = -3;
+	export let titleTextTopPercent = -1.5;
 	export let titleTextLeftPercent = 32;
 	export let titleHeightPercent = 18;
 	export let enableTilt = true;
@@ -84,7 +84,6 @@
 	});
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={wrapperEl}
 	on:pointermove={handlePointerMove}
@@ -92,7 +91,8 @@
 	on:mouseenter={handleMouseEnter}
 	aria-label={titleText ?? 'card'}
 	title={tooltipText}
-	style={`position:relative;width:100%;aspect-ratio:${aspectWidth}/${aspectHeight};overflow:hidden;border-radius:5px;transform:translateZ(0) perspective(900px);will-change:transform;container-type:size;container-name:card;font-family:"Draco", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;`}
+	class="card-font"
+	style={`position:relative;width:100%;aspect-ratio:${aspectWidth}/${aspectHeight};overflow:hidden;border-radius:5px;transform:translateZ(0) perspective(900px);will-change:transform;container-type:size;container-name:card;`}
 >
 	<div style="position:absolute;inset:0;display:flex;flex-direction:column;width:100%;height:100%;">
 		<div style="position:relative;width:100%;height:70%;z-index:0;">
@@ -109,9 +109,12 @@
 		<div
 			style="
         position:relative;height:30%;
-        padding:2cqh 2cqw 2.6cqh 2cqw;
+        padding:0 2cqw 6cqh 2cqw;
         display:flex;justify-content:center;align-items:center;gap:3cqw;
-        background: linear-gradient(180deg, rgba(214,198,150,1), rgba(185,168,122,1));
+        background-image:url('/frames/attributeBackground.png');
+        background-size:cover;
+        background-position:center bottom;
+        background-repeat:no-repeat;
         border-top: 0.25cqh solid rgba(255,255,255,.18);
         z-index:0;
       "
@@ -132,28 +135,15 @@
 						aria-label={b.labelText}
 					>
 						<div
-							style="
-                position:absolute;inset:0;
-                display:flex;align-items:center;justify-content:center;
-                font-weight:900;
-                font-size:5cqh;
-                color:#ffffff;
-                text-shadow:0 0.6cqh 1.2cqh rgba(0,0,0,.55);
-              "
+							class="card-attribute-value"
+							style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:5cqh;"
 						>
 							{b.value}
 						</div>
 					</div>
 					<div
-						style="
-              font-weight:800;
-              font-size:3cqh;
-              letter-spacing:.08em;
-              color:#e8e0cf;
-              text-shadow:0 0.3cqh 0.6cqh rgba(0,0,0,.35);
-              line-height:1;
-              white-space:nowrap;
-            "
+						class="card-attribute-label"
+						style="font-size:3cqh;line-height:1;white-space:nowrap;"
 					>
 						{b.labelText}
 					</div>
@@ -182,27 +172,16 @@
 	{/if}
 	{#if titleText}
 		<div
-			style={`position:absolute;left:${titleTextLeftPercent}%;top:${titleTextTopPercent}%;height:${titleHeightPercent}%;display:flex;align-items:center;justify-content:center;text-align:center;color:whitesmoke;font-weight:800;font-size:4cqh;line-height:1;letter-spacing:.06em;padding:.28rem 0 0 .7rem;z-index:3;pointer-events:none;`}
+			class="card-title-text"
+			style={`position:absolute;left:${titleTextLeftPercent}%;top:${titleTextTopPercent}%;height:${titleHeightPercent}%;display:flex;align-items:center;justify-content:center;text-align:center;z-index:3;pointer-events:none;`}
 		>
 			{titleText}
 		</div>
 	{/if}
 
 	<div
-		style="
-      position:absolute;
-      top:7.5cqh;
-      right:8.5cqw;
-      width:3.8cqh;
-      height:3.8cqh;
-      display:flex;align-items:center;justify-content:center;
-      z-index:3;
-      font-weight:900;
-      font-size:6cqh;
-      color:#2b2416;
-      text-shadow:0 0.3cqh 0.6cqh rgba(0,0,0,.25);
-      pointer-events:none;
-    "
+		class="card-corner-number"
+		style="position:absolute;top:7.5cqh;right:8.5cqw;width:3.8cqh;height:3.8cqh;display:flex;align-items:center;justify-content:center;z-index:3;font-size:6cqh;pointer-events:none;"
 	>
 		{cornerNumberValue}
 	</div>
