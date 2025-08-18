@@ -1,0 +1,40 @@
+/* effects.css */
+
+.winner-glow {
+	animation: winPulse 1300ms ease-in-out infinite alternate;
+	filter: drop-shadow(0 0 12px rgba(255, 220, 120, 0.9));
+	z-index: 1;
+	border-radius: 10px;
+}
+
+@keyframes winPulse {
+	from {
+		transform: scale(1);
+	}
+	to {
+		transform: scale(1.05);
+	}
+}
+
+.loser-shake {
+	animation: loseShake 900ms ease-in-out infinite;
+	filter: grayscale(0.4) brightness(0.85);
+}
+
+@keyframes loseShake {
+	0% {
+		transform: translateX(0);
+	}
+	25% {
+		transform: translateX(-2px);
+	}
+	50% {
+		transform: translateX(2px);
+	}
+	75% {
+		transform: translateX(-1px);
+	}
+	100% {
+		transform: translateX(0);
+	}
+}

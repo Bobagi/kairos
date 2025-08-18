@@ -1,0 +1,30 @@
+/* topbar.css */
+.fixed-top-bar {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.home-btn {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  text-decoration: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(4px);
+}
+
+.mode-pill {
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.5rem;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(4px);
+  font-size: 0.85rem;
+}

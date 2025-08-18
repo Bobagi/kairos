@@ -1,0 +1,28 @@
+/* history.css */
+
+.history {
+	margin-top: 12px;
+	max-width: 980px;
+	margin-left: auto;
+	margin-right: auto;
+	background: rgba(0, 0, 0, 0.45);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 8px;
+	padding: 10px;
+	color: #fff;
+}
+
+.history .title {
+	font-weight: 600;
+	margin-bottom: 6px;
+}
+
+.history .scroll {
+	max-height: 180px;
+	overflow: auto;
+	font-family:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+	font-size: 12px;
+	line-height: 1.4;
+}
