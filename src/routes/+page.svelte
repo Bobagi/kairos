@@ -37,7 +37,7 @@
 	async function newClassicGame() {
 		try {
 			const { gameId } = await startClassicGame(playerIdInput);
-			goto(`/game/${gameId}`);
+			goto(`/game/classic/${gameId}`);
 			return;
 		} catch (e) {
 			console.error(e);
@@ -48,7 +48,7 @@
 	async function newDuelGame() {
 		try {
 			const { gameId } = await startDuelGame(playerIdInput);
-			goto(`/game/${gameId}`);
+			goto(`/game/duel/${gameId}`);
 			return;
 		} catch (e) {
 			console.error(e);
@@ -65,17 +65,10 @@
 		await loadAll();
 	}
 
-	function goToGame(id: string) {
-		goto(`/game/${id}`);
-	}
-
-	async function endGame(id: string) {
-		try {
-			await endGameOnServer(id);
-		} catch (e) {
-			console.error('Could not end game on server', e);
-		}
-		await loadAll();
+	function goToGame(id: string, mode: string) {
+		if (mode === 'CLASSIC') goto(`/game/classic/${id}`);
+		else if (mode === 'ATTRIBUTE_DUEL' || mode === 'DUEL') goto(`/game/duel/${id}`);
+		else goto(`/game/${id}`);
 	}
 </script>
 
@@ -109,11 +102,12 @@
 								<p class="game-meta">Player A: {game.playerAId} • Mode: <b>{game.mode}</b></p>
 							</div>
 							<div class="game-actions">
-								<button class="button button-neutral" on:click={() => goToGame(game.id)}
+								<button class="button button-neutral" on:click={() => goToGame(game.id, game.mode)}
 									>➡️ View</button
 								>
-								<button class="button button-danger" on:click={() => endGame(game.id)}
-									>🗑️ End</button
+								<button
+									class="button button-danger"
+									on:click={() => endGameOnServer(game.id).then(loadAll)}>🗑️ End</button
 								>
 							</div>
 						</li>
