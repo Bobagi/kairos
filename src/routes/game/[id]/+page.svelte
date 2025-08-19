@@ -66,16 +66,6 @@
 	let advanceTimer: number | null = null;
 
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-	const fallbackArt = (code: string) =>
-		`https://bobagi.click/images/cards/${
-			code === 'fireball'
-				? 'flamed-leaf.png'
-				: code === 'heal'
-					? 'remedy.png'
-					: code === 'lightning'
-						? 'power-lightning.png'
-						: `${code}.png`
-		}`;
 
 	// Keep stable uids even when one duplicate is removed
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
@@ -120,7 +110,7 @@
 				code: m.code,
 				name: m.name,
 				description: m.description,
-				imageUrl: (m as any).image ?? (m as any).imageUrl ?? fallbackArt(m.code),
+				imageUrl: (m as any).image ?? (m as any).imageUrl,
 				might: m.might,
 				fire: m.fire,
 				magic: m.magic
