@@ -1,4 +1,30 @@
 /* effects.css */
+.fx-layer {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 3000;
+}
+
+.fx-card {
+	position: absolute;
+	aspect-ratio: 430/670;
+	border-radius: 10px;
+	overflow: hidden;
+	box-shadow:
+		0 10px 26px rgba(0, 0, 0, 0.42),
+		0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+	will-change: transform, opacity;
+}
+
+.fx-card img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
 
 .winner-glow {
 	animation: winPulse 1300ms ease-in-out infinite alternate;

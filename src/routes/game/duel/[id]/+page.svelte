@@ -14,8 +14,9 @@
 	import { onDestroy, onMount } from 'svelte';
 	import '../../game.css';
 
-	export const REVEAL_PAUSE_MS = 2600;
-	export const FLIP_MS = 900;
+	export const REVEAL_PAUSE_MS = 3000;
+	export const DRAW_TRAVEL_MS = 420;
+	export const FLIP_MS = 500;
 
 	type CardDetails = {
 		code: string;
@@ -47,37 +48,45 @@
 		fire?: number;
 		magic?: number;
 	};
+
 	let playerHandCardItems: HandCardItem[] = [];
-	const pendingCardRevealUidSet = new Set<string>();
+	let pendingCardRevealUidSet = new Set<string>();
+	let pendingHiddenUidSet = new Set<string>();
 	let autoFlipCycleCounter = 0;
 
 	let centerRevealCycle = 0;
 	let advanceTimer: number | null = null;
 
+	let fxLayerElement: HTMLDivElement | null = null;
+	let playerDeckAnchorElement: HTMLDivElement | null = null;
+	let opponentDeckAnchorElement: HTMLDivElement | null = null;
+	let opponentHandContainerElement: HTMLDivElement | null = null;
+
+	let hasInitialStateLoaded = false;
+	let previousOppHandCount: number | null = null;
+
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
-		const need = new Map<string, number>();
-		for (const c of nextCodes) need.set(c, (need.get(c) ?? 0) + 1);
-		const reused: HandCardItem[] = [];
+		const buckets = new Map<string, HandCardItem[]>();
 		for (const it of prev) {
-			const left = need.get(it.code) ?? 0;
-			if (left > 0) {
-				reused.push(it);
-				need.set(it.code, left - 1);
-			}
+			const arr = buckets.get(it.code) ?? [];
+			arr.push(it);
+			buckets.set(it.code, arr);
 		}
 		const created: string[] = [];
-		const result: HandCardItem[] = [...reused];
-		for (const [code, cnt] of need.entries()) {
-			for (let i = 0; i < cnt; i++) {
+		const items: HandCardItem[] = [];
+		for (const code of nextCodes) {
+			const q = buckets.get(code);
+			if (q && q.length) {
+				items.push(q.shift() as HandCardItem);
+			} else {
 				const uid = makeUid();
-				result.push({ code, uid });
+				items.push({ code, uid });
 				created.push(uid);
 			}
 		}
-		result.sort((a, b) => nextCodes.indexOf(a.code) - nextCodes.indexOf(b.code));
-		return { items: result, created };
+		return { items, created };
 	}
 
 	const cardDetailsCacheByCode = new Map<string, CardDetails>();
@@ -108,6 +117,69 @@
 		} catch {}
 	}
 
+	function startDrawFx(fromEl: Element | null, toEl: Element | null, copies: number): number {
+		if (!fromEl || !toEl || !fxLayerElement || copies <= 0) return 0;
+		const fromRect = fromEl.getBoundingClientRect();
+		const toRect = toEl.getBoundingClientRect();
+		const fromCx = fromRect.left + fromRect.width / 2;
+		const fromCy = fromRect.top + fromRect.height / 2;
+		const toCx = toRect.left + toRect.width / 2;
+		const toCy = toRect.top + toRect.height / 2;
+		const dx = toCx - fromCx;
+		const dy = toCy - fromCy;
+		for (let i = 0; i < copies; i++) {
+			const fxCardElement = document.createElement('div');
+			fxCardElement.className = 'fx-card';
+			fxCardElement.style.left = `${fromCx - fromRect.width / 2}px`;
+			fxCardElement.style.top = `${fromCy - fromRect.height / 2}px`;
+			fxCardElement.style.width = `${Math.min(fromRect.width, toRect.width)}px`;
+			const fxImgElement = document.createElement('img');
+			fxImgElement.src = cardBackImageUrl;
+			fxImgElement.alt = '';
+			fxCardElement.appendChild(fxImgElement);
+			fxLayerElement.appendChild(fxCardElement);
+			const rotateDeg = (Math.random() * 10 - 5).toFixed(2);
+			const animation = fxCardElement.animate(
+				[
+					{ transform: 'translate(0px,0px) rotate(0deg)', opacity: 0.9 },
+					{ transform: `translate(${dx}px,${dy}px) rotate(${rotateDeg}deg)`, opacity: 0.0 }
+				],
+				{
+					duration: DRAW_TRAVEL_MS,
+					easing: 'cubic-bezier(.22,.61,.36,1)',
+					fill: 'forwards'
+				}
+			);
+			animation.onfinish = () => fxCardElement.remove();
+		}
+		return DRAW_TRAVEL_MS;
+	}
+
+	function addPendingFlipsFor(uids: string[]) {
+		const next = new Set(pendingCardRevealUidSet);
+		for (const u of uids) next.add(u);
+		pendingCardRevealUidSet = next;
+		autoFlipCycleCounter++;
+	}
+
+	function clearPendingFlipFor(uid: string) {
+		const next = new Set(pendingCardRevealUidSet);
+		next.delete(uid);
+		pendingCardRevealUidSet = next;
+	}
+
+	function hideUids(uids: string[]) {
+		const next = new Set(pendingHiddenUidSet);
+		for (const u of uids) next.add(u);
+		pendingHiddenUidSet = next;
+	}
+
+	function unhideUids(uids: string[]) {
+		const next = new Set(pendingHiddenUidSet);
+		for (const u of uids) next.delete(u);
+		pendingHiddenUidSet = next;
+	}
+
 	async function loadGameStateOrFinalResult() {
 		errorMessageText = null;
 		try {
@@ -117,6 +189,8 @@
 				gameStateStore.set({ ...state, gameId: currentGameId });
 
 				const me = state.players[0];
+				const opp = state.players[1] ?? 'playerB';
+
 				const myCodes = Array.isArray(state.hands?.[me]) ? (state.hands[me] as string[]) : [];
 				const { items, created } = reconcile(playerHandCardItems, myCodes);
 				playerHandCardItems = items;
@@ -142,6 +216,8 @@
 						: it;
 				});
 
+				const newOppCount = Array.isArray(state.hands?.[opp]) ? state.hands[opp].length : 0;
+
 				if (state.mode === 'ATTRIBUTE_DUEL' && state.duelStage === 'REVEAL') {
 					centerRevealCycle++;
 					if (advanceTimer) window.clearTimeout(advanceTimer);
@@ -157,10 +233,31 @@
 					advanceTimer = null;
 				}
 
-				if (created.length) {
-					created.forEach((u) => pendingCardRevealUidSet.add(u));
-					autoFlipCycleCounter++;
+				if (hasInitialStateLoaded) {
+					if (created.length) {
+						hideUids(created);
+						const totalMs = startDrawFx(
+							playerDeckAnchorElement,
+							myHandContainerElement,
+							created.length
+						);
+						window.setTimeout(() => {
+							unhideUids(created);
+							addPendingFlipsFor(created);
+						}, totalMs);
+					}
+					if (previousOppHandCount !== null && newOppCount > previousOppHandCount) {
+						startDrawFx(
+							opponentDeckAnchorElement,
+							opponentHandContainerElement,
+							newOppCount - previousOppHandCount
+						);
+					}
 				}
+
+				previousOppHandCount = newOppCount;
+				hasInitialStateLoaded = true;
+
 				return;
 			}
 		} catch {}
@@ -271,7 +368,7 @@
 			<span class="pill deck">🃏 {deckB}</span>
 		</div>
 		<div class="zone-row two-cols">
-			<div class="deck-col">
+			<div class="deck-col" bind:this={opponentDeckAnchorElement}>
 				<DeckStack
 					deckCount={deckB}
 					cardBackImageUrl="/frames/card-back.png"
@@ -284,7 +381,7 @@
 					direction="right"
 				/>
 			</div>
-			<div class="hand opp-hand fan">
+			<div class="hand opp-hand fan" bind:this={opponentHandContainerElement}>
 				{#each Array.from({ length: oppHandCount }) as _, i}
 					<div
 						class="card-socket"
@@ -447,7 +544,7 @@
 			<span class="pill deck">🃏 {deckA}</span>
 		</div>
 		<div class="zone-row two-cols">
-			<div class="deck-col">
+			<div class="deck-col" bind:this={playerDeckAnchorElement}>
 				<DeckStack
 					deckCount={deckA}
 					cardBackImageUrl="/frames/card-back.png"
@@ -471,7 +568,7 @@
 							type="button"
 							class="card-socket focus:outline-none"
 							disabled={Boolean($gameStateStore?.winner)}
-							style={`width:${cardWidthCssValue}; --i:${i}; --n:${playerHandCardItems.length}; ${$gameStateStore?.winner ? 'opacity:.6;cursor:not-allowed;' : ''}`}
+							style={`width:${cardWidthCssValue}; --i:${i}; --n:${playerHandCardItems.length}; ${$gameStateStore?.winner ? 'opacity:.6;cursor:not-allowed;' : ''}${pendingHiddenUidSet.has(it.uid) ? ';visibility:hidden;' : ''}`}
 							title={`Play ${it.name ?? it.code}`}
 							on:click={(e) => onHandCardClick(e, it.code)}
 						>
@@ -480,7 +577,7 @@
 									class="flipper"
 									class:animate={pendingCardRevealUidSet.has(it.uid)}
 									class:start-back={pendingCardRevealUidSet.has(it.uid)}
-									on:animationend={() => pendingCardRevealUidSet.delete(it.uid)}
+									on:animationend={() => clearPendingFlipFor(it.uid)}
 									style={`--flip-ms:${FLIP_MS}ms;`}
 								>
 									<div class="face front">
@@ -501,7 +598,7 @@
 									</div>
 									<div class="face back">
 										<img
-											src={cardBackImageUrl}
+											src="/frames/card-back.png"
 											alt="card-back"
 											style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;display:block;"
 										/>
@@ -515,3 +612,5 @@
 		</div>
 	</section>
 </div>
+
+<div class="fx-layer" bind:this={fxLayerElement}></div>
