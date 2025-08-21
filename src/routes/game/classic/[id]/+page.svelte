@@ -342,7 +342,7 @@
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
 		<div class="zone-header">
-			<span class="name">👤 {playerB}</span>
+			<span class="pill name">👤 {playerB}</span>
 			<span class="pill hp" bind:this={opponentHpPillElement}>❤️ {hpB}</span>
 			<span class="pill deck">🃏 {deckB}</span>
 		</div>
@@ -415,7 +415,7 @@
 
 	<section class="zone player">
 		<div class="zone-header">
-			<span class="name">👤 {playerA}</span>
+			<span class="pill name">👤 {playerA}</span>
 			<span class="pill hp" bind:this={myHpPillElement}>❤️ {hpA}</span>
 			<span class="pill deck">🃏 {deckA}</span>
 		</div>

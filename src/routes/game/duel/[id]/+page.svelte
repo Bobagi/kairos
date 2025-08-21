@@ -17,6 +17,9 @@
 	export const REVEAL_PAUSE_MS = 3000;
 	export const DRAW_TRAVEL_MS = 420;
 	export const FLIP_MS = 500;
+	export const LOSER_SHAKE_BEFORE_DISSOLVE_MS = 2000;
+	export const DISSOLVE_DURATION_MS = 1800;
+	export const REVEAL_EXTRA_BUFFER_MS = 400;
 
 	type CardDetails = {
 		code: string;
@@ -61,6 +64,9 @@
 	let playerDeckAnchorElement: HTMLDivElement | null = null;
 	let opponentDeckAnchorElement: HTMLDivElement | null = null;
 	let opponentHandContainerElement: HTMLDivElement | null = null;
+	let centerSlotAElement: HTMLDivElement | null = null;
+	let centerSlotBElement: HTMLDivElement | null = null;
+	let lastDissolveCycleId: number | null = null;
 
 	let hasInitialStateLoaded = false;
 	let previousOppHandCount: number | null = null;
@@ -144,11 +150,7 @@
 					{ transform: 'translate(0px,0px) rotate(0deg)', opacity: 0.9 },
 					{ transform: `translate(${dx}px,${dy}px) rotate(${rotateDeg}deg)`, opacity: 0.0 }
 				],
-				{
-					duration: DRAW_TRAVEL_MS,
-					easing: 'cubic-bezier(.22,.61,.36,1)',
-					fill: 'forwards'
-				}
+				{ duration: DRAW_TRAVEL_MS, easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'forwards' }
 			);
 			animation.onfinish = () => fxCardElement.remove();
 		}
@@ -221,13 +223,19 @@
 				if (state.mode === 'ATTRIBUTE_DUEL' && state.duelStage === 'REVEAL') {
 					centerRevealCycle++;
 					if (advanceTimer) window.clearTimeout(advanceTimer);
-					advanceTimer = window.setTimeout(async () => {
-						try {
-							await advanceDuel(currentGameId);
-						} finally {
-							await loadGameStateOrFinalResult();
-						}
-					}, REVEAL_PAUSE_MS);
+					advanceTimer = window.setTimeout(
+						async () => {
+							try {
+								await advanceDuel(currentGameId);
+							} finally {
+								await loadGameStateOrFinalResult();
+							}
+						},
+						Math.max(
+							REVEAL_PAUSE_MS,
+							LOSER_SHAKE_BEFORE_DISSOLVE_MS + DISSOLVE_DURATION_MS + REVEAL_EXTRA_BUFFER_MS
+						)
+					);
 				} else if (advanceTimer) {
 					window.clearTimeout(advanceTimer);
 					advanceTimer = null;
@@ -257,7 +265,6 @@
 
 				previousOppHandCount = newOppCount;
 				hasInitialStateLoaded = true;
-
 				return;
 			}
 		} catch {}
@@ -277,14 +284,11 @@
 		if (!state || isGameOver()) return;
 		if (state.mode !== 'ATTRIBUTE_DUEL') return;
 		if (state.duelStage !== 'PICK_CARD') return;
-
 		const me = state.players[0];
 		const center = state.duelCenter ?? {};
 		const alreadyPicked = !!center.aCardCode;
 		if (alreadyPicked) return;
-
 		await ensureCodesCached([code]);
-
 		gameStateStore.update((s) => {
 			if (!s) return s as any;
 			const nextHand = [...(s.hands[me] ?? [])];
@@ -295,7 +299,6 @@
 			if (!nextCenter.chooserId && s.players?.[0]) nextCenter.chooserId = s.players[0];
 			return { ...s, hands: { ...s.hands, [me]: nextHand }, duelCenter: nextCenter };
 		});
-
 		try {
 			await chooseCardForDuel(currentGameId, me, code);
 		} finally {
@@ -321,22 +324,18 @@
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
-
 	$: duelStage = $gameStateStore?.duelStage ?? null;
 	$: duelCenter = $gameStateStore?.duelCenter ?? null;
 	$: chooserId = duelCenter?.chooserId ?? playerA;
 	$: discardPiles = $gameStateStore?.discardPiles ?? null;
-
 	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
 	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
-
 	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
 		? $gameStateStore!.decks[playerA].length
 		: 0;
 	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
 		? $gameStateStore!.decks[playerB].length
 		: 0;
-
 	$: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
 		? $gameStateStore!.hands[playerB].length
 		: 0;
@@ -353,6 +352,251 @@
 		if (myHandContainerElement) ro.observe(myHandContainerElement);
 	}
 	$: computeSpread();
+
+	function detectChosenAttributeMode(center: any): 'fire' | 'magic' | 'might' {
+		const raw = (
+			center?.chosenAttr ??
+			center?.attribute ??
+			center?.attr ??
+			center?.chosenAttribute ??
+			center?.attributeName ??
+			''
+		)
+			.toString()
+			.toLowerCase();
+		if (raw.includes('mag')) return 'magic';
+		if (raw.includes('fire')) return 'fire';
+		if (
+			raw.includes('might') ||
+			raw.includes('strength') ||
+			raw.includes('power') ||
+			raw.includes('forc')
+		)
+			return 'might';
+		return 'fire';
+	}
+
+	function startEdgeInwardDissolveOnElement(
+		targetEl: HTMLElement,
+		mode: 'fire' | 'magic' | 'might',
+		durationMs: number = DISSOLVE_DURATION_MS
+	) {
+		const rect = targetEl.getBoundingClientRect();
+		const deviceScale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+		const canvasWidth = Math.max(2, Math.round(rect.width * deviceScale));
+		const canvasHeight = Math.max(2, Math.round(rect.height * deviceScale));
+		const overlayCanvas = document.createElement('canvas');
+		overlayCanvas.width = canvasWidth;
+		overlayCanvas.height = canvasHeight;
+		overlayCanvas.style.position = 'absolute';
+		overlayCanvas.style.inset = '0';
+		overlayCanvas.style.pointerEvents = 'none';
+		overlayCanvas.style.borderRadius = getComputedStyle(targetEl).borderRadius || '10px';
+		targetEl.appendChild(overlayCanvas);
+		const overlayCtx = overlayCanvas.getContext('2d', { willReadFrequently: true })!;
+		const maskCanvas = document.createElement('canvas');
+		maskCanvas.width = canvasWidth;
+		maskCanvas.height = canvasHeight;
+		const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
+		targetEl.style.webkitMaskSize = '100% 100%';
+		targetEl.style.maskSize = '100% 100%';
+
+		function seedRandom(seed: number) {
+			let t = seed >>> 0;
+			return function () {
+				t += 0x6d2b79f5;
+				let x = Math.imul(t ^ (t >>> 15), 1 | t);
+				x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+				return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+			};
+		}
+		function createOctaveNoise(width: number, height: number, seed: number) {
+			const rand = seedRandom(seed);
+			const data = new Float32Array(width * height);
+			for (let i = 0; i < data.length; i++) data[i] = rand();
+			return { width, height, data };
+		}
+		function sampleBilinear(
+			oct: { width: number; height: number; data: Float32Array },
+			u: number,
+			v: number
+		) {
+			const x = (((u % 1) + 1) % 1) * (oct.width - 1);
+			const y = (((v % 1) + 1) % 1) * (oct.height - 1);
+			const x0 = Math.floor(x),
+				y0 = Math.floor(y);
+			const x1 = Math.min(x0 + 1, oct.width - 1),
+				y1 = Math.min(y0 + 1, oct.height - 1);
+			const tx = x - x0,
+				ty = y - y0;
+			const i00 = y0 * oct.width + x0;
+			const i10 = y0 * oct.width + x1;
+			const i01 = y1 * oct.width + x0;
+			const i11 = y1 * oct.width + x1;
+			const a = oct.data[i00] * (1 - tx) + oct.data[i10] * tx;
+			const b = oct.data[i01] * (1 - tx) + oct.data[i11] * tx;
+			return a * (1 - ty) + b * ty;
+		}
+		const noiseOctaves = [
+			createOctaveNoise(96, 96, 101),
+			createOctaveNoise(192, 192, 202),
+			createOctaveNoise(384, 384, 303)
+		];
+		function sampleFractal(u: number, v: number, t: number) {
+			const o0 = sampleBilinear(noiseOctaves[0], u + t * 0.03, v - t * 0.12);
+			const o1 = sampleBilinear(noiseOctaves[1], u * 2 - t * 0.03, v * 2 - t * 0.18);
+			const o2 = sampleBilinear(noiseOctaves[2], u * 4 + t * 0.02, v * 4 - t * 0.26);
+			return o0 * 0.6 + o1 * 0.3 + o2 * 0.1 - 0.5;
+		}
+		function clamp(v: number, a: number, b: number) {
+			return v < a ? a : v > b ? b : v;
+		}
+		function lerp(a: number, b: number, t: number) {
+			return a + (b - a) * t;
+		}
+		function easeInOutCubic(x: number) {
+			return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+		}
+		function palette(mode: 'fire' | 'magic' | 'might', t: number): [number, number, number] {
+			if (mode === 'fire') {
+				const k = t;
+				const r = Math.round(lerp(255, 255, k));
+				const g = Math.round(lerp(64, 240, k));
+				const b = Math.round(lerp(0, 80, k));
+				return [r, g, b];
+			}
+			if (mode === 'magic') {
+				const k = t;
+				const r = Math.round(lerp(40, 120, k));
+				const g = Math.round(lerp(80, 200, k));
+				const b = Math.round(lerp(160, 255, k));
+				return [r, g, b];
+			}
+			const k = t;
+			const r = Math.round(lerp(120, 200, k));
+			const g = Math.round(lerp(72, 140, k));
+			const b = Math.round(lerp(32, 80, k));
+			return [r, g, b];
+		}
+
+		const maxEdgeDistance = Math.min(canvasWidth, canvasHeight) * 0.5;
+		const fireBandBaseWidth = 0.14;
+		const fireNoiseStrength = 0.33;
+		const innerFizzleWidth = 0.18;
+		const ovalShapeMix = 0.6;
+		const ovalVerticalScale = 0.85;
+		const progressScale = 1.0;
+		const progressBoost = 0.0;
+		let startTimestamp = 0;
+
+		function drawFrame(timestampMs: number) {
+			if (!startTimestamp) startTimestamp = timestampMs;
+			const elapsedMs = timestampMs - startTimestamp;
+			const tSec = elapsedMs / 1000;
+			const normalized = clamp(elapsedMs / durationMs, 0, 1);
+			const boostedProgress = normalized;
+			const overlayImage = overlayCtx.createImageData(canvasWidth, canvasHeight);
+			const overlayData = overlayImage.data;
+			const maskImage = maskCtx.createImageData(canvasWidth, canvasHeight);
+			const maskData = maskImage.data;
+			const centerX = canvasWidth * 0.5;
+			const centerY = canvasHeight * 0.5;
+			for (let y = 0; y < canvasHeight; y++) {
+				for (let x = 0; x < canvasWidth; x++) {
+					const di = (y * canvasWidth + x) * 4;
+					const dxToEdge = Math.min(x, canvasWidth - 1 - x);
+					const dyToEdge = Math.min(y, canvasHeight - 1 - y);
+					const rectDistance = Math.min(dxToEdge, dyToEdge * 1.0);
+					const rectNorm = clamp(rectDistance / maxEdgeDistance, 0, 1);
+					const rx = (x - centerX) / (canvasWidth * 0.5);
+					const ry = (y - centerY) / (canvasHeight * 0.5);
+					const ellipseNorm = clamp(
+						1 - Math.sqrt(rx * rx + ry * ovalVerticalScale * (ry * ovalVerticalScale)),
+						0,
+						1
+					);
+					const edgeNormalized = rectNorm * (1 - ovalShapeMix) + ellipseNorm * ovalShapeMix;
+					const u = x / canvasWidth;
+					const v = y / canvasHeight;
+					const n = sampleFractal(u, v, tSec);
+					const maskValue = edgeNormalized + n * fireNoiseStrength;
+					const localBand = fireBandBaseWidth * (0.7 + 0.6 * (n + 0.5));
+					const delta = Math.abs(maskValue - boostedProgress);
+					const insideDepth = maskValue - boostedProgress;
+					let maskR = 255,
+						maskG = 255,
+						maskB = 255,
+						maskA = 0;
+					if (insideDepth > 0) {
+						const insideT = clamp(insideDepth / innerFizzleWidth, 0, 1);
+						maskA = Math.round(255 * insideT);
+					} else if (delta < localBand * 1.3) {
+						const edgeT = 1 - delta / (localBand * 1.3);
+						maskA = Math.round(255 * edgeT);
+					}
+					maskData[di] = maskR;
+					maskData[di + 1] = maskG;
+					maskData[di + 2] = maskB;
+					maskData[di + 3] = maskA;
+					if (delta < localBand * 1.3) {
+						const te = 1 - delta / (localBand * 1.3);
+						const [fr, fg, fb] = palette(mode, te);
+						overlayData[di] = fr;
+						overlayData[di + 1] = fg;
+						overlayData[di + 2] = fb;
+						overlayData[di + 3] = Math.round(255 * te);
+					} else {
+						overlayData[di] = 0;
+						overlayData[di + 1] = 0;
+						overlayData[di + 2] = 0;
+						overlayData[di + 3] = 0;
+					}
+				}
+			}
+			overlayCtx.putImageData(overlayImage, 0, 0);
+			maskCtx.putImageData(maskImage, 0, 0);
+			const dataUrl = maskCanvas.toDataURL('image/png');
+			targetEl.style.webkitMaskImage = `url(${dataUrl})`;
+			targetEl.style.maskImage = `url(${dataUrl})`;
+			if (normalized < 1) {
+				requestAnimationFrame(drawFrame);
+			} else {
+				targetEl.style.opacity = '0';
+				targetEl.style.pointerEvents = 'none';
+				targetEl.style.webkitMaskImage = 'none';
+				targetEl.style.maskImage = 'none';
+				overlayCanvas.remove();
+			}
+		}
+		requestAnimationFrame(drawFrame);
+	}
+
+	function findLoserCenterElement(): HTMLElement | null {
+		const winner = ($gameStateStore?.duelCenter as any)?.roundWinner;
+		if (!winner) return null;
+		if (winner === playerA) return centerSlotBElement;
+		if (winner === playerB) return centerSlotAElement;
+		return null;
+	}
+
+	$: {
+		if (
+			duelStage === 'REVEAL' &&
+			($gameStateStore?.duelCenter as any)?.roundWinner &&
+			centerRevealCycle !== null &&
+			centerRevealCycle !== lastDissolveCycleId
+		) {
+			const loserEl = findLoserCenterElement();
+			const mode = detectChosenAttributeMode($gameStateStore?.duelCenter);
+			lastDissolveCycleId = centerRevealCycle;
+			if (loserEl) {
+				window.setTimeout(() => {
+					(loserEl as HTMLElement).style.animation = 'none';
+					startEdgeInwardDissolveOnElement(loserEl as HTMLElement, mode, DISSOLVE_DURATION_MS);
+				}, LOSER_SHAKE_BEFORE_DISSOLVE_MS);
+			}
+		}
+	}
 </script>
 
 <div class="fixed-top-bar">
@@ -363,7 +607,7 @@
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
 		<div class="zone-header">
-			<span class="name">👤 {playerB}</span>
+			<span class="pill name">👤 {playerB}</span>
 			<span class="pill hp">❤️ {hpB}</span>
 			<span class="pill deck">🃏 {deckB}</span>
 		</div>
@@ -402,10 +646,10 @@
 
 	<section class="zone center" style="margin:10px auto; max-width:980px;">
 		<div class="zone-header">
-			<span class="name">⚔️ Attribute Duel</span>
+			<span class="pill name">⚔️ Attribute Duel</span>
 			{#if discardPiles}
-				<span class="pill">A discards: {(discardPiles[playerA] ?? []).length}</span>
-				<span class="pill">B discards: {(discardPiles[playerB] ?? []).length}</span>
+				<span class="pill">{playerA} pile: {(discardPiles[playerA] ?? []).length}</span>
+				<span class="pill">{playerB} pile: {(discardPiles[playerB] ?? []).length}</span>
 			{/if}
 		</div>
 
@@ -416,6 +660,7 @@
 			>
 				{#if $gameStateStore?.duelCenter?.aCardCode}
 					<div
+						bind:this={centerSlotAElement}
 						class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
 					>
 						<CardComposite
@@ -458,6 +703,7 @@
 						>
 							<div class="face front">
 								<div
+									bind:this={centerSlotBElement}
 									class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerB ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerB ? 'loser-shake' : ''}`}
 								>
 									<CardComposite
@@ -539,7 +785,7 @@
 
 	<section class="zone player">
 		<div class="zone-header">
-			<span class="name">👤 {playerA}</span>
+			<span class="pill name">👤 {playerA}</span>
 			<span class="pill hp">❤️ {hpA}</span>
 			<span class="pill deck">🃏 {deckA}</span>
 		</div>
