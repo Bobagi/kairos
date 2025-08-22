@@ -1,30 +1,32 @@
+// src/lib/api/GameClient.ts
 import type { Card } from '$lib/stores/game';
 
-// no CORS in dev → use proxy (empty base). In prod, point to API.
-const API_BASE = import.meta.env.DEV ? '' : import.meta.env.VITE_API_BASE;
+// Em dev: base vazia (usa proxy). Em prod: URL do backend.
+const API_BASE: string = (import.meta as any).env.DEV
+	? '' // evita CORS
+	: ((import.meta as any).env.VITE_API_BASE_URL ?? '');
 
-async function fetchJsonStrict<T>(url: string, init?: RequestInit): Promise<T> {
-	const res = await fetch(url, init);
+async function api<T = any>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+	const url = `${API_BASE}${path}`;
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json',
+		...(init.headers as any)
+	};
+	if (token) headers.Authorization = `Bearer ${token}`;
+
+	const res = await fetch(url, { ...init, headers });
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
-		throw new Error(`${init?.method ?? 'GET'} ${url} failed (${res.status}): ${body}`);
+		throw new Error(`${init.method ?? 'GET'} ${path} → ${res.status} ${body}`);
 	}
-	return res.json() as Promise<T>;
+	const ctype = res.headers.get('content-type') ?? '';
+	return (ctype.includes('application/json') ? res.json() : (null as any)) as T;
 }
 
-/* ---------- Types ---------- */
+/* ---------- Tipos ---------- */
 export type GameMode = 'CLASSIC' | 'ATTRIBUTE_DUEL';
-
-export type GameSummary = {
-	id: string;
-	playerAId: string;
-	mode: GameMode;
-};
-
-export type GameResult = {
-	winner: string | null;
-	log: string[];
-};
+export type GameSummary = { id: string; playerAId: string; mode: GameMode };
+export type GameResult = { winner: string | null; log: string[] };
 
 type RawCard = {
 	code: string;
@@ -59,34 +61,44 @@ export async function health(): Promise<string> {
 	return res.text();
 }
 
+/* ---------- Auth ---------- */
+export async function register(username: string, password: string) {
+	return api<{
+		accessToken: string;
+		user: { id: string; username: string; role: 'USER' | 'ADMIN' };
+	}>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) });
+}
+export async function login(username: string, password: string) {
+	return api<{
+		accessToken: string;
+		user: { id: string; username: string; role: 'USER' | 'ADMIN' };
+	}>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+}
+export async function me(token: string) {
+	return api<{ id: string; username: string; role: 'USER' | 'ADMIN' }>('/auth/me', {}, token);
+}
+
 /* ---------- Start / End ---------- */
 export async function startClassicGame(playerAId: string) {
-	return fetchJsonStrict<{ gameId: string }>(`${API_BASE}/game/start-classic`, {
+	return api<{ gameId: string }>('/game/start-classic', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerAId })
 	});
 }
-
 export async function startDuelGame(playerAId: string) {
-	return fetchJsonStrict<{ gameId: string }>(`${API_BASE}/game/start-duel`, {
+	return api<{ gameId: string }>('/game/start-duel', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerAId })
 	});
 }
-
-// legacy
 export async function startGame(playerAId: string) {
-	return fetchJsonStrict<{ gameId: string }>(`${API_BASE}/game/start`, {
+	return api<{ gameId: string }>('/game/start', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerAId })
 	});
 }
-
-export async function endGameOnServer(gameId: string) {
-	await fetchJsonStrict(`${API_BASE}/game/end/${encodeURIComponent(gameId)}`, { method: 'DELETE' });
+export async function endGameOnServer(gameId: string, token?: string) {
+	return api(`/game/end/${encodeURIComponent(gameId)}`, { method: 'DELETE' }, token);
 }
 
 /* ---------- State / Result ---------- */
@@ -95,86 +107,65 @@ export async function getGameState(gameId: string): Promise<any | null> {
 	if (!res.ok) throw new Error(`Failed to fetch game state: ${res.status}`);
 	return res.json();
 }
-
 export async function getGameResult(gameId: string) {
-	return fetchJsonStrict<GameResult>(`${API_BASE}/game/result/${encodeURIComponent(gameId)}`);
+	return api<GameResult>(`/game/result/${encodeURIComponent(gameId)}`);
 }
 
-/* ---------- Actions (classic) ---------- */
+/* ---------- Classic actions ---------- */
 export async function playCard(gameId: string, playerId: string, cardCode: string) {
-	await fetchJsonStrict(`${API_BASE}/game/play-card`, {
+	return api('/game/play-card', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ gameId, player: playerId, card: cardCode })
 	});
 }
-
 export async function skipTurn(gameId: string, playerId: string) {
-	await fetchJsonStrict(`${API_BASE}/game/skip-turn`, {
+	return api('/game/skip-turn', {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ gameId, player: playerId })
 	});
 }
 
-/* ---------- Actions (duel) ---------- */
+/* ---------- Duel actions ---------- */
 export async function chooseCardForDuel(gameId: string, playerId: string, cardCode: string) {
-	return fetchJsonStrict(`${API_BASE}/game/${encodeURIComponent(gameId)}/duel/choose-card`, {
+	return api(`/game/${encodeURIComponent(gameId)}/duel/choose-card`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerId, cardCode })
 	});
 }
-
 export async function chooseAttributeForDuel(
 	gameId: string,
 	playerId: string,
 	attribute: 'magic' | 'might' | 'fire'
 ) {
-	return fetchJsonStrict(`${API_BASE}/game/${encodeURIComponent(gameId)}/duel/choose-attribute`, {
+	return api(`/game/${encodeURIComponent(gameId)}/duel/choose-attribute`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerId, attribute })
 	});
 }
-
 export async function unchooseCardForDuel(gameId: string, playerId: string) {
-	const resp = await fetch(`/game/${gameId}/duel/unchoose-card`, {
+	return api(`/game/${encodeURIComponent(gameId)}/duel/unchoose-card`, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ playerId })
 	});
-	if (!resp.ok) throw new Error('unchoose failed');
-	return resp.json();
 }
-
-/** Advance from REVEAL → (commit round) → PICK_CARD/RESOLVED */
 export async function advanceDuel(gameId: string) {
-	return fetchJsonStrict(`${API_BASE}/game/${encodeURIComponent(gameId)}/duel/advance`, {
-		method: 'POST'
-	});
+	return api(`/game/${encodeURIComponent(gameId)}/duel/advance`, { method: 'POST' });
+}
+export async function advanceDuelRound(gameId: string) {
+	return api(`/game/${encodeURIComponent(gameId)}/duel/advance`, { method: 'POST' });
 }
 
-// aliases (so old imports don't break)
-export { chooseAttributeForDuel as chooseDuelAttribute, chooseCardForDuel as selectDuelCard };
-
-/* ---------- Cards metadata ---------- */
+/* ---------- Cards ---------- */
 const cache = new Map<string, Card>();
-
 export async function getCardMeta(code: string): Promise<Card> {
 	if (cache.has(code)) return cache.get(code)!;
-
-	// try single route
 	try {
-		const raw = await fetchJsonStrict<RawCard>(
-			`${API_BASE}/game/cards/${encodeURIComponent(code)}`
-		);
+		const raw = await api<RawCard>(`/game/cards/${encodeURIComponent(code)}`);
 		const norm = normalizeCard(raw);
 		cache.set(code, norm);
 		return norm;
 	} catch {
-		// fallback: fetch all and filter
-		const all = await fetchJsonStrict<RawCard[]>(`${API_BASE}/game/cards`);
+		const all = await api<RawCard[]>('/game/cards');
 		const found = all.find((c) => c.code === code);
 		if (!found) throw new Error(`Card ${code} not found`);
 		const norm = normalizeCard(found);
@@ -182,18 +173,15 @@ export async function getCardMeta(code: string): Promise<Card> {
 		return norm;
 	}
 }
-
 export async function getCardMetas(codes: string[]): Promise<Card[]> {
 	const missing = codes.filter((c) => !cache.has(c));
 	if (missing.length) {
-		// batch: /game/cards?codes=a,b
 		try {
 			const qs = encodeURIComponent(missing.join(','));
-			const raw = await fetchJsonStrict<RawCard[]>(`${API_BASE}/game/cards?codes=${qs}`);
+			const raw = await api<RawCard[]>(`/game/cards?codes=${qs}`);
 			for (const r of raw) cache.set(r.code, normalizeCard(r));
 		} catch {
-			// fallback: fetch all and fill
-			const all = await fetchJsonStrict<RawCard[]>(`${API_BASE}/game/cards`);
+			const all = await api<RawCard[]>('/game/cards');
 			for (const code of missing) {
 				const r = all.find((x) => x.code === code);
 				if (r) cache.set(code, normalizeCard(r));
@@ -203,46 +191,29 @@ export async function getCardMetas(codes: string[]): Promise<Card[]> {
 	return codes.map((c) => cache.get(c)!).filter(Boolean);
 }
 
-/* ---------- Active games (both modes) ---------- */
-export async function listActiveRaw(): Promise<any[]> {
-	return fetchJsonStrict<any[]>(`${API_BASE}/game/active`);
+/* ---------- Actives (admin) ---------- */
+export async function listActive(token?: string) {
+	return api<GameSummary[]>('/game/active', {}, token);
+}
+export async function listActiveRaw(token?: string) {
+	return listActive(token);
+}
+export async function expireGames(token?: string) {
+	return api('/game/expire', { method: 'POST' }, token);
 }
 
-export async function listActive(): Promise<GameSummary[]> {
-	const raw = await listActiveRaw();
-	return raw.map((g: any) => ({
-		id: typeof g.gameId === 'string' ? g.gameId : String(g?.gameId ?? ''),
-		playerAId: Array.isArray(g.players) && g.players.length > 0 ? g.players[0] : 'unknown',
-		mode: (g.mode as GameMode) ?? 'CLASSIC'
-	}));
-}
-
-export async function expireGames() {
-	await fetchJsonStrict(`${API_BASE}/game/expire`, { method: 'POST' });
-}
-
-export async function advanceDuelRound(gameId: string) {
-	return fetchJsonStrict(`${API_BASE}/game/${encodeURIComponent(gameId)}/duel/advance`, {
-		method: 'POST'
-	});
-}
-
-// --- Tipos básicos de carta (catálogo) ---
+/* ---------- Catálogo ---------- */
 export type CardCatalogItem = {
 	code: string;
 	name: string;
 	description: string;
-	image?: string; // alguns backends usam image
-	imageUrl?: string; // outros usam imageUrl
+	image?: string;
+	imageUrl?: string;
 	might: number;
 	fire: number;
 	magic: number;
 	number: number;
 };
-
-// --- Listar todas as cartas do banco ---
 export async function listAllCards(): Promise<CardCatalogItem[]> {
-	const res = await fetch('/game/cards');
-	if (!res.ok) throw new Error(`Failed to fetch cards: ${res.status}`);
-	return (await res.json()) as CardCatalogItem[];
+	return api<CardCatalogItem[]>('/game/cards');
 }

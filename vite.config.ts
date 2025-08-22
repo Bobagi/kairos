@@ -23,6 +23,11 @@ export default defineConfig(({ mode }) => {
 					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.click',
 					changeOrigin: true,
 					secure: true
+				},
+				'/auth': {
+					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.click',
+					changeOrigin: true,
+					secure: true
 				}
 			}
 		},
