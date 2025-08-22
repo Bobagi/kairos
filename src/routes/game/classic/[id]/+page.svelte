@@ -27,6 +27,7 @@
 		might: number;
 		fire: number;
 		magic: number;
+		number: number;
 	};
 
 	let frameOverlayImageUrl: string | null = '/frames/default.png';
@@ -48,6 +49,7 @@
 		might?: number;
 		fire?: number;
 		magic?: number;
+		number: number;
 	};
 	let playerHandCardItems: HandCardItem[] = [];
 	let pendingCardRevealUidSet = new Set<string>();
@@ -98,7 +100,8 @@
 				imageUrl: (m as any).image ?? (m as any).imageUrl,
 				might: m.might,
 				fire: m.fire,
-				magic: m.magic
+				magic: m.magic,
+				number: m.number
 			});
 		}
 	}
@@ -470,6 +473,7 @@
 											magicValue={it.magic ?? 0}
 											mightValue={it.might ?? 0}
 											fireValue={it.fire ?? 0}
+											cornerNumberValue={it.number ?? 0}
 										/>
 									</div>
 									<div class="face back">

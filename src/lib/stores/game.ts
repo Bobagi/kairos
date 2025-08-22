@@ -13,6 +13,7 @@ export interface Card {
 	fire: number;
 	might: number;
 	magic: number;
+	number: number;
 }
 
 export interface GameState {

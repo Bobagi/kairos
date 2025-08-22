@@ -237,6 +237,7 @@ export type CardCatalogItem = {
 	might: number;
 	fire: number;
 	magic: number;
+	number: number;
 };
 
 // --- Listar todas as cartas do banco ---

@@ -31,6 +31,7 @@
 		might: number;
 		fire: number;
 		magic: number;
+		number: number;
 	};
 
 	let frameOverlayImageUrl: string | null = '/frames/default.png';
@@ -52,6 +53,7 @@
 		might?: number;
 		fire?: number;
 		magic?: number;
+		number: number;
 	};
 
 	let playerHandCardItems: HandCardItem[] = [];
@@ -94,7 +96,11 @@
 				items.push(q.shift() as HandCardItem);
 			} else {
 				const uid = makeUid();
-				items.push({ code, uid });
+				items.push({
+					code,
+					uid,
+					number: 1
+				});
 				created.push(uid);
 			}
 		}
@@ -115,7 +121,8 @@
 				imageUrl: (m as any).image ?? (m as any).imageUrl,
 				might: m.might,
 				fire: m.fire,
-				magic: m.magic
+				magic: m.magic,
+				number: m.number
 			});
 		}
 
@@ -232,7 +239,8 @@
 								imageUrl: d.imageUrl,
 								might: d.might,
 								fire: d.fire,
-								magic: d.magic
+								magic: d.magic,
+								number: d.number
 							}
 						: it;
 				});
@@ -690,6 +698,8 @@
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
 						{#if $gameStateStore?.duelCenter?.aCardCode}
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div
 								bind:this={centerSlotAElement}
 								class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
@@ -715,6 +725,9 @@
 										?.might ?? 0}
 									fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
 										?.fire ?? 0}
+									cornerNumberValue={cardDetailsCacheByCode.get(
+										$gameStateStore.duelCenter.aCardCode
+									)?.number ?? 0}
 								/>
 							</div>
 						{:else}
@@ -891,6 +904,7 @@
 											magicValue={it.magic ?? 0}
 											mightValue={it.might ?? 0}
 											fireValue={it.fire ?? 0}
+											cornerNumberValue={it.number ?? 0}
 										/>
 									</div>
 									<div class="face back">

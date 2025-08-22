@@ -87,6 +87,7 @@
 							magicValue={c.magic ?? 0}
 							mightValue={c.might ?? 0}
 							fireValue={c.fire ?? 0}
+							cornerNumberValue={c.number ?? 0}
 						/>
 					</div>
 				</button>
@@ -115,6 +116,7 @@
 							magicValue={selected.magic ?? 0}
 							mightValue={selected.might ?? 0}
 							fireValue={selected.fire ?? 0}
+                            cornerNumberValue={selected.number ?? 0}
 						/>
 					</div>
 					<div class="meta">

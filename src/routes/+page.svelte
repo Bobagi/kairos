@@ -81,11 +81,11 @@
 
 		<div class="controls-row">
 			<label class="input-wrap">
-				<span class="input-label">Player ID</span>
+				<span class="input-label">Nickname</span>
 				<input class="input-field" bind:value={playerIdInput} placeholder="alice" />
 			</label>
 			<div class="actions-wrap">
-				<button class="button button-primary" on:click={newClassicGame}>▶️ Classic</button>
+				<!-- <button class="button button-primary" on:click={newClassicGame}>▶️ Classic</button> -->
 				<button class="button button-accent" on:click={newDuelGame}>⚔️ Duel</button>
 				<button class="button button-neutral" on:click={() => goto('/gallery')}>🖼️ Gallery</button>
 				<button class="button button-ghost" on:click={expireAndRefresh}>⏳ Expire old games</button>
@@ -100,15 +100,18 @@
 						<li class="game-card">
 							<div class="game-info">
 								<p class="game-id mono">{game.id}</p>
-								<p class="game-meta">Player A: {game.playerAId} • Mode: <b>{game.mode}</b></p>
+								<p class="game-meta">Player: <b>{game.playerAId}</b> • Mode: <b>{game.mode}</b></p>
 							</div>
 							<div class="game-actions">
-								<button class="button button-neutral" on:click={() => goToGame(game.id, game.mode)}
-									>➡️ View</button
+								<button
+									class="button button-neutral"
+									on:click={() => goToGame(game.id, game.mode)}
+									title="Go to game">➡️ Go to game</button
 								>
 								<button
 									class="button button-danger"
-									on:click={() => endGameOnServer(game.id).then(loadAll)}>🗑️ End</button
+									on:click={() => endGameOnServer(game.id).then(loadAll)}
+									title="Finish the game">🗑️ Finish</button
 								>
 							</div>
 						</li>
