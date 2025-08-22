@@ -84,6 +84,7 @@
 	});
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={wrapperEl}
 	on:pointermove={handlePointerMove}
@@ -99,7 +100,7 @@
 			<img
 				src={artImageUrl}
 				alt={titleText ?? 'card-art'}
-				style={`position:absolute;inset:0;width:100%;height:100%;object-fit:${artObjectFit};display:block;`}
+				style={`position:absolute;inset:0;width:100%;height:100%;object-fit:${artObjectFit};display:block;padding: 6% 6% 0 6%;`}
 				loading="eager"
 				decoding="sync"
 				draggable="false"

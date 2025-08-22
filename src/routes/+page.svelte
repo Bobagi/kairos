@@ -87,6 +87,7 @@
 			<div class="actions-wrap">
 				<button class="button button-primary" on:click={newClassicGame}>▶️ Classic</button>
 				<button class="button button-accent" on:click={newDuelGame}>⚔️ Duel</button>
+				<button class="button button-neutral" on:click={() => goto('/gallery')}>🖼️ Gallery</button>
 				<button class="button button-ghost" on:click={expireAndRefresh}>⏳ Expire old games</button>
 			</div>
 		</div>

@@ -226,3 +226,22 @@ export async function advanceDuelRound(gameId: string) {
 		method: 'POST'
 	});
 }
+
+// --- Tipos básicos de carta (catálogo) ---
+export type CardCatalogItem = {
+	code: string;
+	name: string;
+	description: string;
+	image?: string; // alguns backends usam image
+	imageUrl?: string; // outros usam imageUrl
+	might: number;
+	fire: number;
+	magic: number;
+};
+
+// --- Listar todas as cartas do banco ---
+export async function listAllCards(): Promise<CardCatalogItem[]> {
+	const res = await fetch('/game/cards');
+	if (!res.ok) throw new Error(`Failed to fetch cards: ${res.status}`);
+	return (await res.json()) as CardCatalogItem[];
+}
