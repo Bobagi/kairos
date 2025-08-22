@@ -138,6 +138,16 @@ export async function chooseAttributeForDuel(
 	});
 }
 
+export async function unchooseCardForDuel(gameId: string, playerId: string) {
+	const resp = await fetch(`/game/${gameId}/duel/unchoose-card`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ playerId })
+	});
+	if (!resp.ok) throw new Error('unchoose failed');
+	return resp.json();
+}
+
 /** Advance from REVEAL → (commit round) → PICK_CARD/RESOLVED */
 export async function advanceDuel(gameId: string) {
 	return fetchJsonStrict(`${API_BASE}/game/${encodeURIComponent(gameId)}/duel/advance`, {

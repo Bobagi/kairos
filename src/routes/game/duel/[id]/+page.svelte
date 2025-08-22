@@ -1,3 +1,4 @@
+<!-- +page.svelte (only necessary changes applied) -->
 <script lang="ts">
 	import { page as sveltePageStore } from '$app/stores';
 	import {
@@ -6,7 +7,8 @@
 		chooseCardForDuel,
 		getCardMetas,
 		getGameResult,
-		getGameState
+		getGameState,
+		unchooseCardForDuel
 	} from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
@@ -71,6 +73,10 @@
 	let hasInitialStateLoaded = false;
 	let previousOppHandCount: number | null = null;
 
+	let historyScrollContainerElement: HTMLDivElement | null = null;
+	let shouldSkipNextPostPickReload = false;
+	let lastReturnedCode: string | null = null;
+
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
@@ -95,10 +101,11 @@
 		return { items, created };
 	}
 
-	const cardDetailsCacheByCode = new Map<string, CardDetails>();
+	let cardDetailsCacheByCode = new Map<string, CardDetails>();
 	async function ensureCodesCached(codes: string[]) {
 		const missing = codes.filter((c) => !cardDetailsCacheByCode.has(c));
 		if (!missing.length) return;
+
 		const metas = await getCardMetas(missing);
 		for (const m of metas) {
 			cardDetailsCacheByCode.set(m.code, {
@@ -111,6 +118,9 @@
 				magic: m.magic
 			});
 		}
+
+		// 🔔 gatilho de reatividade para Svelte
+		cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
 	}
 
 	async function fetchTemplate() {
@@ -197,6 +207,15 @@
 				const { items, created } = reconcile(playerHandCardItems, myCodes);
 				playerHandCardItems = items;
 
+				// 👉 separa UIDs criados por devolução (sem animação) vs. compras de deck (com animação)
+				let createdFromUnchoose: string[] = [];
+				if (lastReturnedCode) {
+					createdFromUnchoose = playerHandCardItems
+						.filter((it) => it.code === lastReturnedCode && created.includes(it.uid))
+						.map((it) => it.uid);
+				}
+				const createdFromDeck = created.filter((uid) => !createdFromUnchoose.includes(uid));
+
 				if (myCodes.length) await ensureCodesCached(myCodes);
 				const centers: string[] = [];
 				if (state.duelCenter?.aCardCode) centers.push(state.duelCenter.aCardCode);
@@ -242,18 +261,24 @@
 				}
 
 				if (hasInitialStateLoaded) {
-					if (created.length) {
-						hideUids(created);
+					// 🃏 compras do deck -> animam e fazem flip
+					if (createdFromDeck.length) {
+						hideUids(createdFromDeck);
 						const totalMs = startDrawFx(
 							playerDeckAnchorElement,
 							myHandContainerElement,
-							created.length
+							createdFromDeck.length
 						);
 						window.setTimeout(() => {
-							unhideUids(created);
-							addPendingFlipsFor(created);
+							unhideUids(createdFromDeck);
+							addPendingFlipsFor(createdFromDeck);
 						}, totalMs);
 					}
+					// 🔁 devolução do slot -> aparece imediatamente (sem esconder/animar)
+					if (createdFromUnchoose.length) {
+						unhideUids(createdFromUnchoose);
+					}
+
 					if (previousOppHandCount !== null && newOppCount > previousOppHandCount) {
 						startDrawFx(
 							opponentDeckAnchorElement,
@@ -265,6 +290,9 @@
 
 				previousOppHandCount = newOppCount;
 				hasInitialStateLoaded = true;
+
+				// limpa o marcador depois de processar este load
+				lastReturnedCode = null;
 				return;
 			}
 		} catch {}
@@ -279,31 +307,31 @@
 		return Boolean(finalGameResult?.winner ?? $gameStateStore?.winner ?? false);
 	}
 
-	async function onHandCardClick(e: MouseEvent, code: string) {
+	async function onHandCardClick(e: MouseEvent, cardCode: string) {
 		const state = $gameStateStore;
 		if (!state || isGameOver()) return;
 		if (state.mode !== 'ATTRIBUTE_DUEL') return;
+		if (state.duelCenter?.aCardCode) return;
 		if (state.duelStage !== 'PICK_CARD') return;
+
 		const me = state.players[0];
-		const center = state.duelCenter ?? {};
-		const alreadyPicked = !!center.aCardCode;
-		if (alreadyPicked) return;
-		await ensureCodesCached([code]);
-		gameStateStore.update((s) => {
-			if (!s) return s as any;
-			const nextHand = [...(s.hands[me] ?? [])];
-			const idx = nextHand.indexOf(code);
-			if (idx !== -1) nextHand.splice(idx, 1);
-			const nextCenter: any = { ...(s.duelCenter ?? {}) };
-			nextCenter.aCardCode = code;
-			if (!nextCenter.chooserId && s.players?.[0]) nextCenter.chooserId = s.players[0];
-			return { ...s, hands: { ...s.hands, [me]: nextHand }, duelCenter: nextCenter };
-		});
-		try {
-			await chooseCardForDuel(currentGameId, me, code);
-		} finally {
-			await loadGameStateOrFinalResult();
-		}
+		await chooseCardForDuel(currentGameId, me, cardCode);
+		await loadGameStateOrFinalResult();
+	}
+
+	async function onCenterCardReturnToHand() {
+		const state = $gameStateStore;
+		if (!state) return;
+		if (state.mode !== 'ATTRIBUTE_DUEL') return;
+		if (state.duelStage === 'REVEAL') return;
+		if (!state.duelCenter?.aCardCode) return;
+
+		const me = state.players[0];
+
+		lastReturnedCode = state.duelCenter.aCardCode || null;
+
+		await unchooseCardForDuel(currentGameId, me);
+		await loadGameStateOrFinalResult();
 	}
 
 	async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
@@ -312,46 +340,6 @@
 		await chooseAttributeForDuel(currentGameId, me, attr);
 		await loadGameStateOrFinalResult();
 	}
-
-	onMount(async () => {
-		await fetchTemplate();
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
-	onDestroy(() => {
-		if (advanceTimer) window.clearTimeout(advanceTimer);
-	});
-
-	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
-	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
-	$: duelStage = $gameStateStore?.duelStage ?? null;
-	$: duelCenter = $gameStateStore?.duelCenter ?? null;
-	$: chooserId = duelCenter?.chooserId ?? playerA;
-	$: discardPiles = $gameStateStore?.discardPiles ?? null;
-	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
-	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
-	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
-		? $gameStateStore!.decks[playerA].length
-		: 0;
-	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
-		? $gameStateStore!.decks[playerB].length
-		: 0;
-	$: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
-		? $gameStateStore!.hands[playerB].length
-		: 0;
-
-	let myHandContainerElement: HTMLDivElement | null = null;
-	let myHandCardSpreadPixels: number | null = null;
-	function computeSpread() {
-		const count = Math.max(1, playerHandCardItems.length);
-		const w = myHandContainerElement?.clientWidth ?? 0;
-		myHandCardSpreadPixels = Math.min(46, Math.max(10, (w / count) * 0.24));
-	}
-	function setupMyHandResizeObserver() {
-		const ro = new ResizeObserver(() => computeSpread());
-		if (myHandContainerElement) ro.observe(myHandContainerElement);
-	}
-	$: computeSpread();
 
 	function detectChosenAttributeMode(center: any): 'fire' | 'magic' | 'might' {
 		const raw = (
@@ -454,28 +442,25 @@
 		function lerp(a: number, b: number, t: number) {
 			return a + (b - a) * t;
 		}
-		function easeInOutCubic(x: number) {
-			return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-		}
 		function palette(mode: 'fire' | 'magic' | 'might', t: number): [number, number, number] {
 			if (mode === 'fire') {
 				const k = t;
-				const r = Math.round(lerp(255, 255, k));
-				const g = Math.round(lerp(64, 240, k));
-				const b = Math.round(lerp(0, 80, k));
+				const r = Math.round(255);
+				const g = Math.round(64 + (240 - 64) * k);
+				const b = Math.round(0 + (80 - 0) * k);
 				return [r, g, b];
 			}
 			if (mode === 'magic') {
 				const k = t;
-				const r = Math.round(lerp(40, 120, k));
-				const g = Math.round(lerp(80, 200, k));
-				const b = Math.round(lerp(160, 255, k));
+				const r = Math.round(40 + (120 - 40) * k);
+				const g = Math.round(80 + (200 - 80) * k);
+				const b = Math.round(160 + (255 - 160) * k);
 				return [r, g, b];
 			}
 			const k = t;
-			const r = Math.round(lerp(120, 200, k));
-			const g = Math.round(lerp(72, 140, k));
-			const b = Math.round(lerp(32, 80, k));
+			const r = Math.round(120 + (200 - 120) * k);
+			const g = Math.round(72 + (140 - 72) * k);
+			const b = Math.round(32 + (80 - 32) * k);
 			return [r, g, b];
 		}
 
@@ -485,8 +470,6 @@
 		const innerFizzleWidth = 0.18;
 		const ovalShapeMix = 0.6;
 		const ovalVerticalScale = 0.85;
-		const progressScale = 1.0;
-		const progressBoost = 0.0;
 		let startTimestamp = 0;
 
 		function drawFrame(timestampMs: number) {
@@ -506,12 +489,12 @@
 					const di = (y * canvasWidth + x) * 4;
 					const dxToEdge = Math.min(x, canvasWidth - 1 - x);
 					const dyToEdge = Math.min(y, canvasHeight - 1 - y);
-					const rectDistance = Math.min(dxToEdge, dyToEdge * 1.0);
+					const rectDistance = Math.min(dxToEdge, dyToEdge);
 					const rectNorm = clamp(rectDistance / maxEdgeDistance, 0, 1);
 					const rx = (x - centerX) / (canvasWidth * 0.5);
 					const ry = (y - centerY) / (canvasHeight * 0.5);
 					const ellipseNorm = clamp(
-						1 - Math.sqrt(rx * rx + ry * ovalVerticalScale * (ry * ovalVerticalScale)),
+						1 - Math.sqrt(rx * rx + ry * ry * ovalVerticalScale * ovalVerticalScale),
 						0,
 						1
 					);
@@ -523,10 +506,7 @@
 					const localBand = fireBandBaseWidth * (0.7 + 0.6 * (n + 0.5));
 					const delta = Math.abs(maskValue - boostedProgress);
 					const insideDepth = maskValue - boostedProgress;
-					let maskR = 255,
-						maskG = 255,
-						maskB = 255,
-						maskA = 0;
+					let maskA = 0;
 					if (insideDepth > 0) {
 						const insideT = clamp(insideDepth / innerFizzleWidth, 0, 1);
 						maskA = Math.round(255 * insideT);
@@ -534,9 +514,9 @@
 						const edgeT = 1 - delta / (localBand * 1.3);
 						maskA = Math.round(255 * edgeT);
 					}
-					maskData[di] = maskR;
-					maskData[di + 1] = maskG;
-					maskData[di + 2] = maskB;
+					maskData[di] = 255;
+					maskData[di + 1] = 255;
+					maskData[di + 2] = 255;
 					maskData[di + 3] = maskA;
 					if (delta < localBand * 1.3) {
 						const te = 1 - delta / (localBand * 1.3);
@@ -577,6 +557,59 @@
 		if (winner === playerA) return centerSlotBElement;
 		if (winner === playerB) return centerSlotAElement;
 		return null;
+	}
+
+	onMount(async () => {
+		await fetchTemplate();
+		await loadGameStateOrFinalResult();
+		setupMyHandResizeObserver();
+	});
+
+	onDestroy(() => {
+		if (advanceTimer) window.clearTimeout(advanceTimer);
+	});
+
+	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
+	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
+	$: duelStage = $gameStateStore?.duelStage ?? null;
+	$: duelCenter = $gameStateStore?.duelCenter ?? null;
+	$: chooserId = duelCenter?.chooserId ?? playerA;
+	$: discardPiles = $gameStateStore?.discardPiles ?? null;
+	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
+	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
+	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
+		? $gameStateStore!.decks[playerA].length
+		: 0;
+	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
+		? $gameStateStore!.decks[playerB].length
+		: 0;
+	$: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
+		? $gameStateStore!.hands[playerB].length
+		: 0;
+
+	let myHandContainerElement: HTMLDivElement | null = null;
+	let myHandCardSpreadPixels: number | null = null;
+	function computeSpread() {
+		const count = Math.max(1, playerHandCardItems.length);
+		const w = myHandContainerElement?.clientWidth ?? 0;
+		myHandCardSpreadPixels = Math.min(46, Math.max(10, (w / count) * 0.24));
+	}
+	function setupMyHandResizeObserver() {
+		const ro = new ResizeObserver(() => computeSpread());
+		if (myHandContainerElement) ro.observe(myHandContainerElement);
+	}
+	$: computeSpread();
+
+	$: canReturnSelectedCardToHand =
+		!isGameOver() &&
+		$gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
+		Boolean($gameStateStore?.duelCenter?.aCardCode) &&
+		$gameStateStore?.duelStage !== 'REVEAL' &&
+		($gameStateStore?.players?.[0] ?? '') === chooserId;
+
+	$: historyLogLength = $gameStateStore?.log?.length ?? 0;
+	$: if (historyScrollContainerElement && historyLogLength >= 0) {
+		historyScrollContainerElement.scrollTop = 0;
 	}
 
 	$: {
@@ -644,134 +677,152 @@
 		</div>
 	</section>
 
-	<section class="zone center" style="margin:10px auto; max-width:980px;">
-		<div class="zone-header">
-			<span class="pill name">⚔️ Attribute Duel</span>
-			{#if discardPiles}
-				<span class="pill">{playerA} pile: {(discardPiles[playerA] ?? []).length}</span>
-				<span class="pill">{playerB} pile: {(discardPiles[playerB] ?? []).length}</span>
-			{/if}
-		</div>
-
-		<div class="zone-row two-cols" style="gap:24px; align-items:center; justify-content:center;">
-			<div
-				class="duel-slot"
-				style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
-			>
-				{#if $gameStateStore?.duelCenter?.aCardCode}
+	<section class="zone center" style="margin:10px auto; max-width:1200px;">
+		<div class="center-content">
+			<div class="center-left">
+				<div
+					class="zone-row two-cols"
+					style="gap:24px; align-items:center; justify-content:center; grid-template-columns:auto auto;"
+				>
 					<div
-						bind:this={centerSlotAElement}
-						class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
+						class="duel-slot"
+						class:slot-removable={canReturnSelectedCardToHand}
+						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
-						<CardComposite
-							artImageUrl={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
-								?.imageUrl ?? ''}
-							frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
-							titleImageUrl={titleOverlayImageUrl}
-							titleText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)?.name ??
-								$gameStateStore.duelCenter.aCardCode}
-							aspectWidth={430}
-							aspectHeight={670}
-							artObjectFit="cover"
-							enableTilt={false}
-							descriptionText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
-								?.description ?? ''}
-							magicValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)?.magic ??
-								0}
-							mightValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)?.might ??
-								0}
-							fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)?.fire ??
-								0}
-						/>
-					</div>
-				{:else}
-					<span class="placeholder">A: select a card…</span>
-				{/if}
-			</div>
-
-			<div
-				class="duel-slot"
-				style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
-			>
-				{#if $gameStateStore?.duelCenter?.bCardCode}
-					<div class="flip-wrap" data-cycle={centerRevealCycle}>
-						<div
-							class="flipper"
-							class:start-back={$gameStateStore?.duelStage !== 'REVEAL'}
-							class:animate={$gameStateStore?.duelStage === 'REVEAL'}
-							style={`--flip-ms:${FLIP_MS}ms;`}
-						>
-							<div class="face front">
-								<div
-									bind:this={centerSlotBElement}
-									class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerB ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerB ? 'loser-shake' : ''}`}
-								>
-									<CardComposite
-										artImageUrl={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
-											?.imageUrl ?? ''}
-										frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
-										titleImageUrl={titleOverlayImageUrl}
-										titleText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
-											?.name ?? $gameStateStore.duelCenter.bCardCode}
-										aspectWidth={430}
-										aspectHeight={670}
-										artObjectFit="cover"
-										enableTilt={false}
-										descriptionText={cardDetailsCacheByCode.get(
-											$gameStateStore.duelCenter.bCardCode
-										)?.description ?? ''}
-										magicValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
-											?.magic ?? 0}
-										mightValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
-											?.might ?? 0}
-										fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
-											?.fire ?? 0}
-									/>
-								</div>
-							</div>
-							<div class="face back">
-								<img
-									src={cardBackImageUrl}
-									alt="hidden"
-									style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;display:block;"
+						{#if $gameStateStore?.duelCenter?.aCardCode}
+							<div
+								bind:this={centerSlotAElement}
+								class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
+								on:click={onCenterCardReturnToHand}
+								title="Return card to hand"
+							>
+								<CardComposite
+									artImageUrl={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.imageUrl ?? ''}
+									frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
+									titleImageUrl={titleOverlayImageUrl}
+									titleText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.name ?? $gameStateStore.duelCenter.aCardCode}
+									aspectWidth={430}
+									aspectHeight={670}
+									artObjectFit="cover"
+									enableTilt={false}
+									descriptionText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.description ?? ''}
+									magicValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.magic ?? 0}
+									mightValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.might ?? 0}
+									fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.aCardCode)
+										?.fire ?? 0}
 								/>
 							</div>
+						{:else}
+							<div class="slot-empty">
+								<span class="slot-icon">🃏</span>
+							</div>
+						{/if}
+					</div>
+
+					<div
+						class="duel-slot"
+						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
+					>
+						{#if $gameStateStore?.duelCenter?.bCardCode}
+							<div class="flip-wrap" data-cycle={centerRevealCycle}>
+								<div
+									class="flipper"
+									class:start-back={$gameStateStore?.duelStage !== 'REVEAL'}
+									class:animate={$gameStateStore?.duelStage === 'REVEAL'}
+									style={`--flip-ms:${FLIP_MS}ms;`}
+								>
+									<div class="face front">
+										<div
+											bind:this={centerSlotBElement}
+											class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerB ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerB ? 'loser-shake' : ''}`}
+										>
+											<CardComposite
+												artImageUrl={cardDetailsCacheByCode.get(
+													$gameStateStore.duelCenter.bCardCode
+												)?.imageUrl ?? ''}
+												frameImageUrl={frameOverlayImageUrl ?? '/frames/default.png'}
+												titleImageUrl={titleOverlayImageUrl}
+												titleText={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
+													?.name ?? $gameStateStore.duelCenter.bCardCode}
+												aspectWidth={430}
+												aspectHeight={670}
+												artObjectFit="cover"
+												enableTilt={false}
+												descriptionText={cardDetailsCacheByCode.get(
+													$gameStateStore.duelCenter.bCardCode
+												)?.description ?? ''}
+												magicValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
+													?.magic ?? 0}
+												mightValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
+													?.might ?? 0}
+												fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
+													?.fire ?? 0}
+											/>
+										</div>
+									</div>
+									<div class="face back">
+										<img
+											src={cardBackImageUrl}
+											alt="hidden"
+											style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:10px;display:block;"
+										/>
+									</div>
+								</div>
+							</div>
+						{:else}
+							<div class="slot-empty slot-empty-opp">
+								<span class="slot-icon">⚔️</span>
+							</div>
+						{/if}
+					</div>
+				</div>
+
+				{#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerA}
+					<div class="notice chooser" style="margin-top:12px; text-align:center;">
+						<span>Choose attribute:</span>
+						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}
+							>MAGIC</button
+						>
+						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}
+							>MIGHT</button
+						>
+						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}
+							>FIRE</button
+						>
+					</div>
+				{:else if duelStage === 'PICK_ATTRIBUTE'}
+					<div class="notice warn" style="margin-top:12px; text-align:center;">
+						Waiting for {chooserId} to choose the attribute…
+					</div>
+				{/if}
+			</div>
+
+			<div class="center-right">
+				<div class="zone-header">
+					<span class="pill name">⚔️ Attribute Duel</span>
+					{#if discardPiles}
+						<span class="pill">{playerA} pile: {(discardPiles[playerA] ?? []).length}</span>
+						<span class="pill">{playerB} pile: {(discardPiles[playerB] ?? []).length}</span>
+					{/if}
+				</div>
+
+				{#if $gameStateStore?.log?.length}
+					<div class="history">
+						<div class="title">History</div>
+						<div class="scroll" bind:this={historyScrollContainerElement}>
+							{#each $gameStateStore.log as line}
+								<div>{line}</div>
+							{/each}
 						</div>
 					</div>
-				{:else}
-					<span class="placeholder">B: select a card…</span>
 				{/if}
 			</div>
 		</div>
-
-		{#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerA}
-			<div class="notice chooser" style="margin-top:12px; text-align:center;">
-				<span>Choose attribute:</span>
-				<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}
-					>MAGIC</button
-				>
-				<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}
-					>MIGHT</button
-				>
-				<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}>FIRE</button
-				>
-			</div>
-		{:else if duelStage === 'PICK_ATTRIBUTE'}
-			<div class="notice warn" style="margin-top:12px; text-align:center;">
-				Waiting for {chooserId} to choose the attribute…
-			</div>
-		{/if}
-
-		{#if $gameStateStore?.log?.length}
-			<div class="history">
-				<div class="title">History</div>
-				<div class="scroll">
-					{#each $gameStateStore.log as line}
-						<div>{line}</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
 	</section>
 
 	{#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}

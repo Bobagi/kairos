@@ -1,25 +1,34 @@
-/* history.css */
-
 .history {
 	margin-top: 12px;
-	max-width: 980px;
-	margin-left: auto;
-	margin-right: auto;
 	background: rgba(0, 0, 0, 0.45);
 	border: 1px solid rgba(255, 255, 255, 0.15);
 	border-radius: 8px;
 	padding: 10px;
 	color: #fff;
+	display: flex;
+	flex-direction: column;
+	height: clamp(160px, 24vh, 280px);
+	max-width: 100%;
+	min-width: 0;
+	box-sizing: border-box;
+	overflow: hidden;
 }
-
 .history .title {
 	font-weight: 600;
 	margin-bottom: 6px;
 }
-
 .history .scroll {
-	max-height: 180px;
-	overflow: auto;
+	flex: 1 1 auto;
+	min-height: 0;
+	max-width: 100%;
+	width: 100%;
+	overflow-y: auto;
+	overflow-x: auto;
+	display: flex;
+	flex-direction: column-reverse;
+	white-space: pre-wrap;
+	word-break: break-word;
+	overflow-wrap: anywhere;
 	font-family:
 		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
 		monospace;

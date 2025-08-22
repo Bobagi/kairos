@@ -5,7 +5,6 @@
 	font-style: normal;
 	font-display: swap;
 }
-
 .card-font {
 	--card-font-size: 3cqh;
 	font-family:
@@ -21,21 +20,18 @@
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
-
 .card-title-text {
 	color: #fff;
 	text-shadow: none !important;
 	letter-spacing: -0.18em !important;
 	font-size: 8cqh !important;
 }
-
 .card-attribute-value {
 	color: #fff;
 	text-shadow: none !important;
 	letter-spacing: -0.03em;
 	font-size: 10cqh !important;
 }
-
 .card-attribute-label {
 	color: #fff;
 	text-shadow: none !important;
@@ -43,7 +39,6 @@
 	-webkit-text-stroke: 0.25cqh #000 !important;
 	font-size: 5cqh !important;
 }
-
 .card-corner-number {
 	color: #fff;
 	text-shadow: none !important;

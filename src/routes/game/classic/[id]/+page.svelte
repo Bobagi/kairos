@@ -85,7 +85,7 @@
 		return { items, created };
 	}
 
-	const cardDetailsCacheByCode = new Map<string, CardDetails>();
+	let cardDetailsCacheByCode = new Map<string, CardDetails>();
 	async function ensureCodesCached(codes: string[]) {
 		const missing = codes.filter((c) => !cardDetailsCacheByCode.has(c));
 		if (!missing.length) return;

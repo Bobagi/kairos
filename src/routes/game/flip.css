@@ -1,4 +1,3 @@
-/* Flip 3D das cartas */
 .flip-wrap {
 	position: relative;
 	width: 100%;
@@ -11,12 +10,11 @@
 	transform-style: preserve-3d;
 	border-radius: 10px;
 	overflow: visible;
-	transform: rotateY(0deg); /* default frente */
+	transform: rotateY(0deg);
 }
 .flipper.start-back {
 	transform: rotateY(180deg);
-} /* novas começam no verso */
-
+}
 .face {
 	position: absolute;
 	inset: 0;
@@ -30,7 +28,6 @@
 	transform: rotateY(180deg);
 	z-index: 1;
 }
-
 .animate {
 	animation: flipReveal var(--flip-ms, 700ms) ease forwards;
 }
