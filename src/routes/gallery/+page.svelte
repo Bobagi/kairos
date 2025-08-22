@@ -4,17 +4,14 @@
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import { onMount } from 'svelte';
 	import '../game/game.css';
-	// fontes/frames/efeitos já usados no jogo
+	// reaproveita frames/tilt/fontes
 
-	// assets iguais aos do duelo
 	let frameOverlayImageUrl: string | null = '/frames/default.png';
 	const titleOverlayImageUrl = '/frames/title.png';
 
 	let loading = true;
 	let errorMsg: string | null = null;
 	let cards: CardCatalogItem[] = [];
-
-	// carta selecionada (modal)
 	let selected: CardCatalogItem | null = null;
 
 	async function fetchTemplate() {
@@ -25,7 +22,7 @@
 				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
 			if (remote) frameOverlayImageUrl = remote;
 		} catch {
-			/* ignora: usa default */
+			/* se não existir o endpoint, mantém default */
 		}
 	}
 
@@ -51,18 +48,19 @@
 	}
 </script>
 
-<svelte:window on:keydown={(e) => e.key === 'Escape' && closeModal()} />
+<svelte:window on:keydown={(e) => e.key === 'Escape' && (selected = null)} />
 
-<!-- Top bar reaproveitando estilos do jogo -->
+<!-- Painel escuro central -->
 <div class="fixed-top-bar">
 	<a href="/" class="home-btn">← Home</a>
 	<div class="mode-pill"><strong>Card Gallery</strong></div>
 </div>
-
-<div class="gallery-shell" style="padding-top:56px;">
-	<header class="gallery-header">
-		<h1>Card Gallery</h1>
-		<p class="hint">Clique em uma carta para ampliar.</p>
+<div class="gallery-panel">
+	<header class="panel-header">
+		<div class="panel-title-wrap">
+			<h1 class="panel-title">Card Gallery</h1>
+			<p class="panel-sub">Clique em uma carta para ampliar.</p>
+		</div>
 	</header>
 
 	{#if loading}
@@ -72,9 +70,8 @@
 	{:else if !cards.length}
 		<p class="status">Nenhuma carta encontrada.</p>
 	{:else}
-		<!-- Grade: tenta 5 colunas; reduz responsivamente -->
 		<div class="gallery-grid">
-			{#each cards as c (c.code + (c.name ?? ''))}
+			{#each cards as c (c.code + c.name)}
 				<button type="button" class="card-tile" title={c.name} on:click={() => openModal(c)}>
 					<div class="card-wrap">
 						<CardComposite
@@ -99,10 +96,9 @@
 </div>
 
 {#if selected}
-	<div class="modal-backdrop" on:click|self={closeModal} role="dialog" aria-modal="true">
+	<div class="modal-backdrop" on:click|self={closeModal}>
 		<div class="modal-card">
 			<button class="modal-close" on:click={closeModal} aria-label="Fechar">×</button>
-
 			<div class="modal-body">
 				<div class="modal-inner">
 					<div class="modal-card-wrap">
@@ -121,7 +117,6 @@
 							fireValue={selected.fire ?? 0}
 						/>
 					</div>
-
 					<div class="meta">
 						<h2>{selected.name ?? selected.code}</h2>
 						<p class="mono code">{selected.code}</p>
@@ -141,25 +136,47 @@
 {/if}
 
 <style>
-	.gallery-shell {
-		max-width: 1400px; /* pode subir/baixar esse limite */
-		margin: 0 auto;
-		padding: 18px 16px 40px;
-		box-sizing: border-box;
+	/* ===== Painel escuro no estilo da home ===== */
+	.gallery-panel {
+		margin: clamp(18px, 5vh, 40px) auto;
+		padding: clamp(16px, 2.2vw, 24px);
+		border-radius: 16px;
+		background: rgba(8, 10, 14, 0.88);
+		color: #e7f2f3;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		box-shadow:
+			0 26px 60px rgba(0, 0, 0, 0.45),
+			0 10px 24px rgba(0, 0, 0, 0.35),
+			inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+		backdrop-filter: blur(4px);
 	}
-	.gallery-header {
+
+	.panel-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-bottom: 14px;
+	}
+	.panel-title-wrap {
 		display: flex;
 		align-items: baseline;
 		gap: 12px;
-		margin-bottom: 12px;
 	}
-	.gallery-header h1 {
+	.panel-title {
+		font-weight: 800;
+		font-size: clamp(22px, 3.2vw, 36px);
 		margin: 0;
 	}
-	.gallery-header .hint {
+	.panel-sub {
+		margin: 0;
 		opacity: 0.8;
-		margin: 0;
 	}
+	.panel-actions {
+		display: flex;
+		gap: 8px;
+	}
+
 	.status {
 		opacity: 0.9;
 		padding: 8px 0;
@@ -168,15 +185,13 @@
 		color: #ffbdbd;
 	}
 
-	/* ====== Grade responsiva ====== 
-	   5 colunas no desktop; cada carta tem min 220px e cresce até preencher a célula */
+	/* ===== Grade responsiva (5 → 1) ===== */
 	.gallery-grid {
 		display: grid;
 		gap: clamp(12px, 1.6vw, 22px);
 		grid-template-columns: repeat(5, minmax(220px, 1fr));
 		align-items: start;
 	}
-
 	@media (max-width: 1280px) {
 		.gallery-grid {
 			grid-template-columns: repeat(4, minmax(200px, 1fr));
@@ -210,8 +225,6 @@
 		outline-offset: 4px;
 		border-radius: 12px;
 	}
-
-	/* A carta agora ocupa 100% da célula (sem max-width baixo) */
 	.card-wrap {
 		width: 100%;
 		aspect-ratio: 430 / 670;
@@ -224,7 +237,7 @@
 		display: block;
 	}
 
-	/* ===== Modal (mantém sem cortes em telas grandes/baixas) ===== */
+	/* ===== Modal ===== */
 	.modal-backdrop {
 		position: fixed;
 		inset: 0;
@@ -277,7 +290,6 @@
 		min-width: 0;
 	}
 	.modal-card-wrap {
-		/* cresce até caber na viewport sem cortar */
 		height: min(78vh, calc((96vw - 140px) * 670 / 430));
 		aspect-ratio: 430 / 670;
 		width: auto;
