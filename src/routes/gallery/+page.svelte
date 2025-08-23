@@ -47,6 +47,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Gallery – Chronos</title>
+</svelte:head>
+
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (selected = null)} />
 
 <!-- Top bar fixo -->

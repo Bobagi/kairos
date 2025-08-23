@@ -37,6 +37,10 @@
 	}
 </script>
 
+<svelte:head>
+	<title>Register – Chronos</title>
+</svelte:head>
+
 <div class="page-shell">
 	<section class="content-panel">
 		<header class="panel-header">

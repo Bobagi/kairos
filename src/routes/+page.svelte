@@ -173,6 +173,10 @@
 	$: statRank = 'Bronze I';
 </script>
 
+<svelte:head>
+	<title>Chronos</title>
+</svelte:head>
+
 <div class="page-shell">
 	<section class="content-panel">
 		<header class="panel-header">

@@ -1,4 +1,3 @@
-<!-- +page.svelte (only necessary changes applied) -->
 <script lang="ts">
 	import { page as sveltePageStore } from '$app/stores';
 	import {
@@ -639,6 +638,11 @@
 		}
 	}
 </script>
+
+<!-- +page.svelte (only necessary changes applied) -->
+<svelte:head>
+	<title>Duel – Chronos</title>
+</svelte:head>
 
 <div class="fixed-top-bar">
 	<a href="/" class="home-btn">← Home</a>
