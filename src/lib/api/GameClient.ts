@@ -191,6 +191,15 @@ export async function getCardMetas(codes: string[]): Promise<Card[]> {
 	return codes.map((c) => cache.get(c)!).filter(Boolean);
 }
 
+// lista apenas os jogos do usuário autenticado
+export async function listMyActive(token: string) {
+	const r = await fetch('/game/active/mine', {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!r.ok) return []; // se 404/401/403, caímos em vazio
+	return r.json();
+}
+
 /* ---------- Actives (admin) ---------- */
 export async function listActive(token?: string) {
 	return api<GameSummary[]>('/game/active', {}, token);

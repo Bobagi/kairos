@@ -1,59 +1,58 @@
+/* =========================
+   Theme tokens
+   ========================= */
 :root {
 	--bg-1: #ffd944;
 	--bg-2: #f7b500;
-	--panel-bg: #0f1115;
-	--panel-border: #1f2330;
-	--muted: #a8b0c0;
-	--text: #e6e9f0;
+
+	--panel-bg: rgba(12, 14, 18, 0.92);
+	--panel-border: #222635;
+	--panel-glow: 0 24px 48px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+
+	--text: #e9ecf6;
+	--muted: #9aa3b4;
+	--heading: #f4f7ff;
+
 	--accent: #6d5ef5;
 	--primary: #ffcc33;
 	--danger: #ef4444;
 	--neutral: #2a2f3a;
+
+	--ring: 0 0 0 3px rgba(255, 204, 51, 0.25);
+
+	--radius: 16px;
+	--radius-sm: 10px;
+
 	--shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
+/* =========================
+   Base
+   ========================= */
 * {
 	box-sizing: border-box;
 }
-
+html,
 body {
-	background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
+	height: 100%;
 }
-
-.page-shell {
-	min-height: 100vh;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	padding: 24px;
-	align-items: start;
-}
-
-.content-panel {
-	width: 100%;
-	max-width: 980px;
-	background: var(--panel-bg);
-	color: var(--text);
-	border: 1px solid var(--panel-border);
-	border-radius: 16px;
-	box-shadow: var(--shadow);
-	padding: 28px;
-}
-
-.panel-header {
-	text-align: center;
-	margin-bottom: 20px;
-}
-.panel-title {
-	margin: 0 0 6px 0;
-	font-size: 32px;
-	line-height: 1.2;
-	font-weight: 800;
-}
-.health-text {
+body {
 	margin: 0;
-	color: var(--muted);
-	font-size: 14px;
+	font-family:
+		ui-sans-serif,
+		system-ui,
+		-apple-system,
+		Segoe UI,
+		Roboto,
+		Ubuntu,
+		Cantarell,
+		Noto Sans,
+		Helvetica Neue,
+		Arial,
+		'Apple Color Emoji',
+		'Segoe UI Emoji';
+	color: var(--text);
+	background: linear-gradient(180deg, var(--bg-1), var(--bg-2));
 }
 .mono {
 	font-family:
@@ -61,13 +60,46 @@ body {
 		monospace;
 }
 
-.controls-row {
-	display: grid;
-	grid-template-columns: 1fr;
-	gap: 14px;
-	margin-top: 22px;
+/* =========================
+   Shell + Panel
+   ========================= */
+.page-shell {
+	min-height: 100vh;
+	display: flex;
+	justify-content: center;
+	padding: 24px;
 }
 
+.content-panel {
+	background: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: var(--radius);
+	box-shadow: var(--panel-glow);
+	padding: 28px;
+	max-width: 980px;
+}
+
+/* Header */
+.panel-header {
+	text-align: center;
+	margin-bottom: 20px;
+}
+.panel-title {
+	margin: 0 0 6px 0;
+	font-weight: 800;
+	font-size: clamp(26px, 3.6vw, 36px);
+	color: var(--heading);
+	letter-spacing: 0.3px;
+}
+.health-text {
+	margin: 0;
+	color: var(--muted);
+	font-size: 14px;
+}
+
+/* =========================
+   Forms
+   ========================= */
 .input-wrap {
 	display: grid;
 	gap: 6px;
@@ -79,45 +111,89 @@ body {
 .input-field {
 	width: 100%;
 	padding: 10px 12px;
-	border-radius: 10px;
+	border-radius: var(--radius-sm);
 	border: 1px solid var(--panel-border);
-	background: #181b22;
+	background: #161a22;
 	color: var(--text);
 	outline: none;
 	transition:
-		box-shadow 0.15s,
 		border-color 0.15s,
+		box-shadow 0.15s,
 		transform 0.02s;
 }
 .input-field:focus {
 	border-color: var(--primary);
-	box-shadow: 0 0 0 3px rgba(255, 204, 51, 0.25);
+	box-shadow: var(--ring);
 }
 
-.actions-wrap {
-	display: flex;
-	flex-wrap: wrap;
+/* Grids */
+.controls-col {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 14px;
+}
+.auth-col {
+	margin-top: 22px;
+}
+.auth-fields {
+	display: grid;
 	gap: 10px;
 }
 
+.auth-actions {
+	display: grid;
+	gap: 8px;
+	align-content: start;
+	justify-self: center;
+}
+.auth-actions.stacked {
+	max-width: 260px;
+}
+
+/* Generic row used em outras partes */
+.controls-row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 14px;
+	align-items: end;
+	margin-top: 22px;
+}
+
+/* Badges */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 10px;
+	border-radius: 999px;
+	background: #1b2030;
+	color: #cfe4ff;
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	font-weight: 700;
+	font-size: 12px;
+}
+
+/* =========================
+   Buttons
+   ========================= */
 .button {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: 8px;
 	padding: 10px 14px;
-	border-radius: 10px;
+	border-radius: var(--radius-sm);
 	border: 1px solid transparent;
 	font-weight: 700;
 	font-size: 14px;
 	cursor: pointer;
+	user-select: none;
 	transition:
 		transform 0.02s,
 		filter 0.15s,
 		background-color 0.15s,
 		border-color 0.15s,
 		color 0.15s;
-	user-select: none;
 }
 .button:active {
 	transform: translateY(1px);
@@ -130,7 +206,6 @@ body {
 .button-primary:hover {
 	filter: brightness(1.05);
 }
-
 .button-accent {
 	background: var(--accent);
 	color: #fff;
@@ -138,16 +213,6 @@ body {
 .button-accent:hover {
 	filter: brightness(1.05);
 }
-
-.button-ghost {
-	background: transparent;
-	border-color: #3a4050;
-	color: #ffd38a;
-}
-.button-ghost:hover {
-	background: #1a1e27;
-}
-
 .button-neutral {
 	background: var(--neutral);
 	color: #fff;
@@ -155,7 +220,14 @@ body {
 .button-neutral:hover {
 	filter: brightness(1.05);
 }
-
+.button-ghost {
+	background: transparent;
+	border-color: #3a4050;
+	color: #ffd38a;
+}
+.button-ghost:hover {
+	background: #1a1f2a;
+}
 .button-danger {
 	background: var(--danger);
 	color: #fff;
@@ -163,7 +235,16 @@ body {
 .button-danger:hover {
 	filter: brightness(1.05);
 }
+.button[disabled] {
+	opacity: 0.45;
+	cursor: not-allowed;
+	filter: grayscale(0.2);
+	pointer-events: none;
+}
 
+/* =========================
+   Active games list
+   ========================= */
 .games-section {
 	margin-top: 26px;
 }
@@ -172,7 +253,6 @@ body {
 	font-size: 20px;
 	font-weight: 700;
 }
-
 .games-list {
 	list-style: none;
 	margin: 0;
@@ -182,10 +262,10 @@ body {
 }
 .game-card {
 	display: grid;
-	grid-template-columns: 1fr;
+	grid-template-columns: 1fr auto;
 	gap: 10px;
 	padding: 14px;
-	background: #141821;
+	background: #121720;
 	border: 1px solid var(--panel-border);
 	border-radius: 12px;
 }
@@ -208,22 +288,112 @@ body {
 	gap: 8px;
 	flex-wrap: wrap;
 }
-
 .empty-text {
 	color: var(--muted);
 	margin: 6px 0 0 0;
 }
 
-@media (min-width: 768px) {
+/* =========================
+   Profile Card
+   ========================= */
+.profile-card {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 16px;
+	padding: 14px;
+	background: #121720;
+	border: 1px solid var(--panel-border);
+	border-radius: 12px;
+	margin-top: 14px;
+}
+.avatar-wrap {
+	width: 72px;
+	height: 72px;
+	border-radius: 50%;
+	overflow: hidden;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	background: #0f131b;
+	display: grid;
+	place-items: center;
+}
+.avatar-wrap img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+.profile-main {
+	min-width: 0;
+}
+.profile-top {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+.user-name {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: 18px;
+}
+.role-badge {
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: #1b2030;
+	border: 1px solid rgba(255, 255, 255, 0.06);
+	font-size: 12px;
+	color: #cfe4ff;
+	font-weight: 700;
+}
+.profile-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(120px, 1fr));
+	gap: 10px;
+	margin-top: 10px;
+}
+.stat {
+	background: #0f141d;
+	border: 1px solid var(--panel-border);
+	border-radius: 10px;
+	padding: 10px 12px;
+}
+.stat-num {
+	font-weight: 800;
+	font-size: 18px;
+}
+.stat-label {
+	color: var(--muted);
+	font-size: 12px;
+}
+.profile-cta {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 10px;
+}
+
+/* =========================
+   Responsive
+   ========================= */
+@media (max-width: 720px) {
 	.controls-row {
-		grid-template-columns: 1fr auto;
-		align-items: end;
+		grid-template-columns: 1fr;
 	}
 	.game-card {
-		grid-template-columns: 1fr auto;
-		align-items: center;
+		grid-template-columns: 1fr;
 	}
-	.panel-title {
-		font-size: 36px;
+	.profile-card {
+		grid-template-columns: 1fr;
+	}
+	.stats-grid {
+		grid-template-columns: 1fr 1fr;
 	}
 }

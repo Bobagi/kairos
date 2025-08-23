@@ -4,7 +4,6 @@
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import { onMount } from 'svelte';
 	import '../game/game.css';
-	// reaproveita frames/tilt/fontes
 
 	let frameOverlayImageUrl: string | null = '/frames/default.png';
 	const titleOverlayImageUrl = '/frames/title.png';
@@ -50,17 +49,28 @@
 
 <svelte:window on:keydown={(e) => e.key === 'Escape' && (selected = null)} />
 
-<!-- Painel escuro central -->
+<!-- Top bar fixo -->
 <div class="fixed-top-bar">
 	<a href="/" class="home-btn">← Home</a>
 	<div class="mode-pill"><strong>Card Gallery</strong></div>
 </div>
+
+<!-- Painel escuro central -->
 <div class="gallery-panel">
 	<header class="panel-header">
-		<div class="panel-title-wrap">
-			<h1 class="panel-title">Card Gallery</h1>
-			<p class="panel-sub">Clique em uma carta para ampliar.</p>
-		</div>
+		<h1 class="panel-title">Card Gallery</h1>
+
+		<!-- NOVO: logo centralizado -->
+		<img
+			class="gallery-logo"
+			src="/icons/logo.png"
+			alt="Kairos logo"
+			loading="lazy"
+			decoding="async"
+		/>
+
+		<!-- Mensagem centralizada -->
+		<p class="panel-sub">Clique em uma carta para ampliar.</p>
 	</header>
 
 	{#if loading}
@@ -116,7 +126,7 @@
 							magicValue={selected.magic ?? 0}
 							mightValue={selected.might ?? 0}
 							fireValue={selected.fire ?? 0}
-                            cornerNumberValue={selected.number ?? 0}
+							cornerNumberValue={selected.number ?? 0}
 						/>
 					</div>
 					<div class="meta">
@@ -153,30 +163,27 @@
 		backdrop-filter: blur(4px);
 	}
 
+	/* Cabeçalho centralizado */
 	.panel-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
+		display: grid;
+		justify-items: center;
+		text-align: center;
+		gap: 10px;
 		margin-bottom: 14px;
-	}
-	.panel-title-wrap {
-		display: flex;
-		align-items: baseline;
-		gap: 12px;
 	}
 	.panel-title {
 		font-weight: 800;
 		font-size: clamp(22px, 3.2vw, 36px);
 		margin: 0;
 	}
+	.gallery-logo {
+		width: clamp(120px, 40vw, 440px);
+		height: auto;
+		filter: drop-shadow(0 8px 18px rgba(246, 214, 6, 0.35));
+	}
 	.panel-sub {
 		margin: 0;
-		opacity: 0.8;
-	}
-	.panel-actions {
-		display: flex;
-		gap: 8px;
+		opacity: 0.85;
 	}
 
 	.status {
@@ -280,10 +287,12 @@
 	.modal-close:hover {
 		background: rgba(255, 255, 255, 0.08);
 	}
+
 	.modal-body {
 		overflow: auto;
 		padding: clamp(10px, 1.2vw, 16px);
 	}
+
 	.modal-inner {
 		display: grid;
 		grid-template-columns: auto 1fr;
@@ -326,6 +335,7 @@
 		opacity: 0.95;
 		line-height: 1.4;
 	}
+
 	@media (max-width: 900px) {
 		.modal-inner {
 			grid-template-columns: 1fr;
