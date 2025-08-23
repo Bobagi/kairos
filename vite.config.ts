@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
 		plugins: [tailwindcss(), sveltekit()],
 		server: {
 			host: '0.0.0.0',
-			port: 5173,
+			port: 3055,
 			https: {
 				key: fs.readFileSync(path.resolve(__dirname, 'certs/localhost-key.pem')),
 				cert: fs.readFileSync(path.resolve(__dirname, 'certs/localhost.pem'))
