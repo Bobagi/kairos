@@ -802,15 +802,17 @@
 				{#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerA}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						<span>Choose attribute:</span>
-						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}
-							>MAGIC</button
-						>
-						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}
-							>MIGHT</button
-						>
-						<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}
-							>FIRE</button
-						>
+						<div>
+							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}>
+								<img src="/icons/magic_icon.png" alt="Magic icon" />
+							</button>
+							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}>
+								<img src="/icons/strength_icon.png" alt="Might icon" />
+							</button>
+							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}>
+								<img src="/icons/fire_icon.png" alt="Fire icon" />
+							</button>
+						</div>
 					</div>
 				{:else if duelStage === 'PICK_ATTRIBUTE'}
 					<div class="notice warn" style="margin-top:12px; text-align:center;">
