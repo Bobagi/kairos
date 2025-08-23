@@ -7,10 +7,11 @@
 		endGameOnServer,
 		expireGames,
 		health,
-		listActive, // admin
-		listMyActive, // usuário comum
+		listActive,
+		listMyActive,
 		login,
 		me,
+		myStats,
 		startClassicGame,
 		startDuelGame
 	} from '$lib/api/GameClient';
@@ -18,22 +19,23 @@
 
 	type User = { id: string; username: string; role: 'USER' | 'ADMIN' };
 
-	/* ---- auth state ---- */
 	let token: string | null = null;
 	let currentUser: User | null = null;
 
-	/* ---- login form ---- */
 	let usernameInput = '';
 	let passwordInput = '';
 	let loginError: string | null = null;
 
-	/* ---- ui/data ---- */
 	let backendHealthMsg = 'Checking server…';
-	let allActive: any[] = []; // admin – tudo
-	let myActive: any[] = []; // só meus jogos
+	let allActive: any[] = [];
+	let myActive: any[] = [];
 	$: isAdmin = currentUser?.role === 'ADMIN';
 
-	/* ---- helpers ---- */
+	/* ---- stats ---- */
+	let statGamesPlayed = 0;
+	let statGamesWon = 0;
+	let statGamesDrawn = 0;
+
 	function isMine(g: any, myId: string) {
 		if (Array.isArray(g?.players)) return g.players.includes(myId);
 		if (g?.playerAId) return g.playerAId === myId || g?.playerBId === myId;
@@ -64,6 +66,9 @@
 
 		myActive = [];
 		allActive = [];
+		statGamesPlayed = 0;
+		statGamesWon = 0;
+		statGamesDrawn = 0;
 
 		if (!currentUser || !token) return;
 
@@ -74,9 +79,16 @@
 			} else {
 				myActive = await listMyActive(token);
 			}
+			const s = await myStats(token);
+			statGamesPlayed = s.gamesPlayed ?? 0;
+			statGamesWon = s.gamesWon ?? 0;
+			statGamesDrawn = s.gamesDrawn ?? 0;
 		} catch {
 			myActive = [];
 			allActive = [];
+			statGamesPlayed = 0;
+			statGamesWon = 0;
+			statGamesDrawn = 0;
 		}
 	}
 
@@ -114,6 +126,9 @@
 		if (browser) localStorage.removeItem('token');
 		allActive = [];
 		myActive = [];
+		statGamesPlayed = 0;
+		statGamesWon = 0;
+		statGamesDrawn = 0;
 	}
 
 	async function newClassicGame() {
@@ -156,7 +171,6 @@
 		else goto(`/game/${id}`);
 	}
 
-	// avatar
 	const AVATAR_PRIMARY = '/avatars/placeholder.png';
 	const AVATAR_FALLBACK = 'https://bobagi.click/images/cards/23.png';
 	function onAvatarError(e: Event) {
@@ -166,16 +180,13 @@
 		img.src = AVATAR_FALLBACK;
 	}
 
-	/* ---- stats mock ---- */
 	$: statActive = myActive.length;
 	$: statLastUpdated =
 		myActive.length > 0 ? fmtAgo(Math.max(...myActive.map((g) => lastActivityOf(g) || 0))) : '—';
 	$: statRank = 'Bronze I';
 </script>
 
-<svelte:head>
-	<title>Chronos</title>
-</svelte:head>
+<svelte:head><title>Chronos</title></svelte:head>
 
 <div class="page-shell">
 	<section class="content-panel">
@@ -185,7 +196,6 @@
 		</header>
 
 		{#if !currentUser}
-			<!-- ========= LOGIN ========= -->
 			<form class="controls-col auth-col" on:submit|preventDefault={doLogin}>
 				<div class="auth-fields">
 					<label class="input-wrap">
@@ -208,7 +218,6 @@
 						/>
 					</label>
 				</div>
-
 				<div class="auth-actions stacked">
 					<button class="button button-primary" type="submit">🔐 Login</button>
 					<button class="button button-accent" type="button" on:click={() => goto('/gallery')}
@@ -219,12 +228,8 @@
 					>
 				</div>
 			</form>
-
-			{#if loginError}
-				<p class="empty-text" style="color:#ffbdbd">{loginError}</p>
-			{/if}
+			{#if loginError}<p class="empty-text" style="color:#ffbdbd">{loginError}</p>{/if}
 		{:else}
-			<!-- ========= PERFIL ========= -->
 			<div class="profile-card">
 				<div class="avatar-wrap" aria-hidden="true">
 					<img src={AVATAR_PRIMARY} alt="User avatar" loading="lazy" on:error={onAvatarError} />
@@ -234,9 +239,7 @@
 					<div class="profile-top">
 						<div class="user-name">
 							<strong>{currentUser.username}</strong>
-							{#if isAdmin}
-								<span class="role-badge admin">ADMIN</span>
-							{/if}
+							{#if isAdmin}<span class="role-badge admin">ADMIN</span>{/if}
 						</div>
 						<div class="profile-actions">
 							<button class="button button-neutral" on:click={() => goto('/gallery')}
@@ -262,6 +265,18 @@
 							<div class="stat-num">{statLastUpdated}</div>
 							<div class="stat-label">Last activity</div>
 						</div>
+						<div class="stat">
+							<div class="stat-num">{statGamesPlayed}</div>
+							<div class="stat-label">Games played</div>
+						</div>
+						<div class="stat">
+							<div class="stat-num">{statGamesWon}</div>
+							<div class="stat-label">Wins</div>
+						</div>
+						<div class="stat">
+							<div class="stat-num">{statGamesDrawn}</div>
+							<div class="stat-label">Draws</div>
+						</div>
 					</div>
 
 					<div class="profile-cta">
@@ -275,7 +290,6 @@
 				</div>
 			</div>
 
-			<!-- ========= LISTAS ========= -->
 			<section class="games-section">
 				<h2 class="section-title">My Active Games</h2>
 				{#if myActive.length === 0}
@@ -287,8 +301,7 @@
 								<div class="game-info">
 									<p class="game-id mono">{gameIdOf(g)}</p>
 									<p class="game-meta">
-										Mode: <b>{g.mode}</b>
-										{#if lastActivityOf(g)}
+										Mode: <b>{g.mode}</b>{#if lastActivityOf(g)}
 											• Updated: {fmtAgo(lastActivityOf(g))}{/if}
 									</p>
 								</div>
@@ -324,10 +337,8 @@
 									<div class="game-info">
 										<p class="game-id mono">{gameIdOf(g)}</p>
 										<p class="game-meta">
-											Mode: <b>{g.mode}</b>
-											{#if g.players}
-												• Players: {g.players.join(' · ')}{/if}
-											{#if lastActivityOf(g)}
+											Mode: <b>{g.mode}</b>{#if g.players}
+												• Players: {g.players.join(' · ')}{/if}{#if lastActivityOf(g)}
 												• Updated: {fmtAgo(lastActivityOf(g))}{/if}
 										</p>
 									</div>
@@ -352,14 +363,11 @@
 </div>
 
 <style>
-	/* badge ADMIN com cor primária */
 	.role-badge.admin {
 		background: var(--primary);
 		color: #111;
 		border-color: rgba(0, 0, 0, 0.08);
 	}
-
-	/* força layout em coluna no login */
 	.controls-col.auth-col {
 		display: grid;
 		grid-template-columns: 1fr;

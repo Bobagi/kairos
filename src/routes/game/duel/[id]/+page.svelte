@@ -75,8 +75,8 @@
 	let previousOppHandCount: number | null = null;
 
 	let historyScrollContainerElement: HTMLDivElement | null = null;
-	let shouldSkipNextPostPickReload = false;
 	let lastReturnedCode: string | null = null;
+	let lastAppliedLogLength = -1;
 
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -95,11 +95,7 @@
 				items.push(q.shift() as HandCardItem);
 			} else {
 				const uid = makeUid();
-				items.push({
-					code,
-					uid,
-					number: 1
-				});
+				items.push({ code, uid, number: 1 });
 				created.push(uid);
 			}
 		}
@@ -110,7 +106,6 @@
 	async function ensureCodesCached(codes: string[]) {
 		const missing = codes.filter((c) => !cardDetailsCacheByCode.has(c));
 		if (!missing.length) return;
-
 		const metas = await getCardMetas(missing);
 		for (const m of metas) {
 			cardDetailsCacheByCode.set(m.code, {
@@ -124,19 +119,7 @@
 				number: m.number
 			});
 		}
-
-		// 🔔 gatilho de reatividade para Svelte
 		cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
-	}
-
-	async function fetchTemplate() {
-		try {
-			const resp = await fetch('/game/templates');
-			const templates = (await resp.json()) as Array<{ frameUrl?: string }>;
-			const remote =
-				Array.isArray(templates) && templates[0]?.frameUrl ? templates[0].frameUrl : null;
-			if (remote) frameOverlayImageUrl = remote;
-		} catch {}
 	}
 
 	function startDrawFx(fromEl: Element | null, toEl: Element | null, copies: number): number {
@@ -213,7 +196,6 @@
 				const { items, created } = reconcile(playerHandCardItems, myCodes);
 				playerHandCardItems = items;
 
-				// 👉 separa UIDs criados por devolução (sem animação) vs. compras de deck (com animação)
 				let createdFromUnchoose: string[] = [];
 				if (lastReturnedCode) {
 					createdFromUnchoose = playerHandCardItems
@@ -268,7 +250,6 @@
 				}
 
 				if (hasInitialStateLoaded) {
-					// 🃏 compras do deck -> animam e fazem flip
 					if (createdFromDeck.length) {
 						hideUids(createdFromDeck);
 						const totalMs = startDrawFx(
@@ -281,11 +262,9 @@
 							addPendingFlipsFor(createdFromDeck);
 						}, totalMs);
 					}
-					// 🔁 devolução do slot -> aparece imediatamente (sem esconder/animar)
 					if (createdFromUnchoose.length) {
 						unhideUids(createdFromUnchoose);
 					}
-
 					if (previousOppHandCount !== null && newOppCount > previousOppHandCount) {
 						startDrawFx(
 							opponentDeckAnchorElement,
@@ -297,8 +276,6 @@
 
 				previousOppHandCount = newOppCount;
 				hasInitialStateLoaded = true;
-
-				// limpa o marcador depois de processar este load
 				lastReturnedCode = null;
 				return;
 			}
@@ -311,7 +288,7 @@
 	}
 
 	function isGameOver(): boolean {
-		return Boolean(finalGameResult?.winner ?? $gameStateStore?.winner ?? false);
+		return Boolean(($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null);
 	}
 
 	async function onHandCardClick(e: MouseEvent, cardCode: string) {
@@ -320,7 +297,6 @@
 		if (state.mode !== 'ATTRIBUTE_DUEL') return;
 		if (state.duelCenter?.aCardCode) return;
 		if (state.duelStage !== 'PICK_CARD') return;
-
 		const me = state.players[0];
 		await chooseCardForDuel(currentGameId, me, cardCode);
 		await loadGameStateOrFinalResult();
@@ -332,11 +308,8 @@
 		if (state.mode !== 'ATTRIBUTE_DUEL') return;
 		if (state.duelStage === 'REVEAL') return;
 		if (!state.duelCenter?.aCardCode) return;
-
 		const me = state.players[0];
-
 		lastReturnedCode = state.duelCenter.aCardCode || null;
-
 		await unchooseCardForDuel(currentGameId, me);
 		await loadGameStateOrFinalResult();
 	}
@@ -446,28 +419,22 @@
 		function clamp(v: number, a: number, b: number) {
 			return v < a ? a : v > b ? b : v;
 		}
-		function lerp(a: number, b: number, t: number) {
-			return a + (b - a) * t;
-		}
 		function palette(mode: 'fire' | 'magic' | 'might', t: number): [number, number, number] {
 			if (mode === 'fire') {
-				const k = t;
-				const r = Math.round(255);
-				const g = Math.round(64 + (240 - 64) * k);
-				const b = Math.round(0 + (80 - 0) * k);
+				const r = 255;
+				const g = Math.round(64 + (240 - 64) * t);
+				const b = Math.round(0 + (80 - 0) * t);
 				return [r, g, b];
 			}
 			if (mode === 'magic') {
-				const k = t;
-				const r = Math.round(40 + (120 - 40) * k);
-				const g = Math.round(80 + (200 - 80) * k);
-				const b = Math.round(160 + (255 - 160) * k);
+				const r = Math.round(40 + (120 - 40) * t);
+				const g = Math.round(80 + (200 - 80) * t);
+				const b = Math.round(160 + (255 - 160) * t);
 				return [r, g, b];
 			}
-			const k = t;
-			const r = Math.round(120 + (200 - 120) * k);
-			const g = Math.round(72 + (140 - 72) * k);
-			const b = Math.round(32 + (80 - 32) * k);
+			const r = Math.round(120 + (200 - 120) * t);
+			const g = Math.round(72 + (140 - 72) * t);
+			const b = Math.round(32 + (80 - 32) * t);
 			return [r, g, b];
 		}
 
@@ -567,7 +534,6 @@
 	}
 
 	onMount(async () => {
-		await fetchTemplate();
 		await loadGameStateOrFinalResult();
 		setupMyHandResizeObserver();
 	});
@@ -578,6 +544,8 @@
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
+	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
+	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
 	$: duelStage = $gameStateStore?.duelStage ?? null;
 	$: duelCenter = $gameStateStore?.duelCenter ?? null;
 	$: chooserId = duelCenter?.chooserId ?? playerA;
@@ -608,15 +576,20 @@
 	$: computeSpread();
 
 	$: canReturnSelectedCardToHand =
-		!isGameOver() &&
+		!($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
 		$gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
 		Boolean($gameStateStore?.duelCenter?.aCardCode) &&
 		$gameStateStore?.duelStage !== 'REVEAL' &&
 		($gameStateStore?.players?.[0] ?? '') === chooserId;
 
 	$: historyLogLength = $gameStateStore?.log?.length ?? 0;
-	$: if (historyScrollContainerElement && historyLogLength >= 0) {
-		historyScrollContainerElement.scrollTop = 0;
+	$: if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
+		lastAppliedLogLength = historyLogLength;
+		requestAnimationFrame(() => {
+			if (historyScrollContainerElement) {
+				historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
+			}
+		});
 	}
 
 	$: {
@@ -637,9 +610,10 @@
 			}
 		}
 	}
+
+	$: resolvedWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
 </script>
 
-<!-- +page.svelte (only necessary changes applied) -->
 <svelte:head>
 	<title>Duel – Chronos</title>
 </svelte:head>
@@ -652,7 +626,7 @@
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
 		<div class="zone-header">
-			<span class="pill name">👤 {playerB}</span>
+			<span class="pill name">👤 {playerBUsername}</span>
 			<span class="pill hp">❤️ {hpB}</span>
 			<span class="pill deck">🃏 {deckB}</span>
 		</div>
@@ -702,8 +676,6 @@
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
 						{#if $gameStateStore?.duelCenter?.aCardCode}
-							<!-- svelte-ignore a11y_click_events_have_key_events -->
-							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div
 								bind:this={centerSlotAElement}
 								class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
@@ -819,21 +791,31 @@
 						Waiting for {chooserId} to choose the attribute…
 					</div>
 				{/if}
+
+				{#if duelStage === 'REVEAL' && !($gameStateStore?.duelCenter as any)?.roundWinner}
+					<div class="notice info" style="margin-top:12px; text-align:center;">
+						Rodada empatada!
+					</div>
+				{/if}
 			</div>
 
 			<div class="center-right">
 				<div class="zone-header">
 					<span class="pill name">⚔️ Attribute Duel</span>
 					{#if discardPiles}
-						<span class="pill">{playerA} pile: {(discardPiles[playerA] ?? []).length}</span>
-						<span class="pill">{playerB} pile: {(discardPiles[playerB] ?? []).length}</span>
+						<span class="pill">{playerAUsername} pile: {(discardPiles[playerA] ?? []).length}</span>
+						<span class="pill">{playerBUsername} pile: {(discardPiles[playerB] ?? []).length}</span>
 					{/if}
 				</div>
 
 				{#if $gameStateStore?.log?.length}
 					<div class="history">
 						<div class="title">History</div>
-						<div class="scroll" bind:this={historyScrollContainerElement}>
+						<div
+							class="scroll"
+							style="flex-direction: column;"
+							bind:this={historyScrollContainerElement}
+						>
 							{#each $gameStateStore.log as line}
 								<div>{line}</div>
 							{/each}
@@ -844,9 +826,9 @@
 		</div>
 	</section>
 
-	{#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
+	{#if resolvedWinner !== null}
 		<div class="notice success" style="margin-top:12px; text-align:center;">
-			Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
+			{resolvedWinner === 'DRAW' ? 'Partida empatada' : `Winner: ${resolvedWinner}`}
 		</div>
 		<div style="margin-top:8px;text-align:center;">
 			<a href="/" class="btn" style="text-decoration:none;">Back to home</a>
@@ -855,7 +837,7 @@
 
 	<section class="zone player">
 		<div class="zone-header">
-			<span class="pill name">👤 {playerA}</span>
+			<span class="pill name">👤 {playerAUsername}</span>
 			<span class="pill hp">❤️ {hpA}</span>
 			<span class="pill deck">🃏 {deckA}</span>
 		</div>

@@ -1,9 +1,8 @@
 // src/lib/api/GameClient.ts
 import type { Card } from '$lib/stores/game';
 
-// Em dev: base vazia (usa proxy). Em prod: URL do backend.
 const API_BASE: string = (import.meta as any).env.DEV
-	? '' // evita CORS
+	? ''
 	: ((import.meta as any).env.VITE_API_BASE_URL ?? '');
 
 async function api<T = any>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -13,7 +12,6 @@ async function api<T = any>(path: string, init: RequestInit = {}, token?: string
 		...(init.headers as any)
 	};
 	if (token) headers.Authorization = `Bearer ${token}`;
-
 	const res = await fetch(url, { ...init, headers });
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');
@@ -184,7 +182,7 @@ export async function getCardMetas(codes: string[]): Promise<Card[]> {
 			const all = await api<RawCard[]>('/game/cards');
 			for (const code of missing) {
 				const r = all.find((x) => x.code === code);
-				if (r) cache.set(code, normalizeCard(r));
+				if (r) cache.set(code, normalizeCard(r as any));
 			}
 		}
 	}
@@ -193,10 +191,10 @@ export async function getCardMetas(codes: string[]): Promise<Card[]> {
 
 // lista apenas os jogos do usuário autenticado
 export async function listMyActive(token: string) {
-	const r = await fetch('/game/active/mine', {
+	const r = await fetch(`${API_BASE}/game/active/mine`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
-	if (!r.ok) return []; // se 404/401/403, caímos em vazio
+	if (!r.ok) return [];
 	return r.json();
 }
 
@@ -209,6 +207,13 @@ export async function listActiveRaw(token?: string) {
 }
 export async function expireGames(token?: string) {
 	return api('/game/expire', { method: 'POST' }, token);
+}
+
+/* ---------- Estatísticas ---------- */
+export async function myStats(
+	token: string
+): Promise<{ gamesPlayed: number; gamesWon: number; gamesDrawn: number }> {
+	return api('/game/stats/me', {}, token);
 }
 
 /* ---------- Catálogo ---------- */

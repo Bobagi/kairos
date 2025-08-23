@@ -19,6 +19,7 @@ export interface Card {
 export interface GameState {
 	gameId?: string;
 	players: string[];
+	playerUsernames?: Record<string, string>;
 	turn: number;
 	lastActivity: number;
 	winner: string | null;
