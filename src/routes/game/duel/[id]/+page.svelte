@@ -7,6 +7,7 @@
 		getCardMetas,
 		getGameResult,
 		getGameState,
+		listAllCards,
 		unchooseCardForDuel
 	} from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
@@ -103,20 +104,79 @@
 	}
 
 	let cardDetailsCacheByCode = new Map<string, CardDetails>();
+	let catalogNumberByCode = new Map<string, number>();
+	let catalogLoaded = false;
+
+	async function ensureCatalogLoaded() {
+		if (catalogLoaded) return;
+		try {
+			const all = await listAllCards();
+			for (const c of all) {
+				const raw =
+					(c as any).number ??
+					(c as any).cardNumber ??
+					(c as any).cornerNumber ??
+					(c as any).meta?.number ??
+					(c as any).metadata?.number ??
+					(c as any).no ??
+					(c as any).idx ??
+					(c as any).id ??
+					null;
+				const parsed =
+					typeof raw === 'string'
+						? Number.parseInt(raw.replace(/[^\d]/g, ''), 10)
+						: Number.isFinite(raw)
+							? Number(raw)
+							: null;
+				if (parsed != null && !Number.isNaN(parsed)) {
+					catalogNumberByCode.set((c as any).code, parsed);
+				}
+			}
+		} finally {
+			catalogLoaded = true;
+		}
+	}
+
 	async function ensureCodesCached(codes: string[]) {
-		const missing = codes.filter((c) => !cardDetailsCacheByCode.has(c));
+		const missing = codes.filter((c) => {
+			const d = cardDetailsCacheByCode.get(c);
+			return !d || d.number == null || Number.isNaN(d.number as any);
+		});
 		if (!missing.length) return;
+
+		await ensureCatalogLoaded();
+
 		const metas = await getCardMetas(missing);
 		for (const m of metas) {
-			cardDetailsCacheByCode.set(m.code, {
-				code: m.code,
-				name: m.name,
-				description: m.description,
+			const code = (m as any).code;
+			const rawNum =
+				(m as any).number ??
+				(m as any).cardNumber ??
+				(m as any).cornerNumber ??
+				(m as any).meta?.number ??
+				(m as any).metadata?.number ??
+				(m as any).no ??
+				(m as any).idx ??
+				(m as any).id ??
+				null;
+			const parsedNum =
+				typeof rawNum === 'string'
+					? Number.parseInt(rawNum.replace(/[^\d]/g, ''), 10)
+					: Number.isFinite(rawNum)
+						? Number(rawNum)
+						: null;
+			const catalogNum = catalogNumberByCode.get(code) ?? null;
+			const finalNum = parsedNum ?? catalogNum ?? 0;
+
+			cardDetailsCacheByCode.set(code, {
+				code,
+				name: (m as any).name,
+				description: (m as any).description,
 				imageUrl: (m as any).image ?? (m as any).imageUrl,
-				might: m.might,
-				fire: m.fire,
-				magic: m.magic,
-				number: m.number
+				might: (m as any).might,
+				fire: (m as any).fire,
+				magic: (m as any).magic,
+				number: finalNum
 			});
 		}
 		cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
@@ -751,6 +811,9 @@
 													?.might ?? 0}
 												fireValue={cardDetailsCacheByCode.get($gameStateStore.duelCenter.bCardCode)
 													?.fire ?? 0}
+												cornerNumberValue={cardDetailsCacheByCode.get(
+													$gameStateStore.duelCenter.bCardCode
+												)?.number ?? 0}
 											/>
 										</div>
 									</div>
@@ -793,7 +856,7 @@
 				{/if}
 
 				{#if duelStage === 'REVEAL' && !($gameStateStore?.duelCenter as any)?.roundWinner}
-					<div class="notice info" style="margin-top:12px; text-align:center;">
+					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						Rodada empatada!
 					</div>
 				{/if}
