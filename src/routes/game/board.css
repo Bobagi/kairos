@@ -1,0 +1,16 @@
+html,
+body {
+	height: 100%;
+	justify-items: center;
+}
+body {
+	margin: 0;
+	background: linear-gradient(270deg, var(--bg-1), var(--bg-2));
+}
+.board {
+	max-width: 1200px;
+	display: grid;
+	grid-template-rows: auto auto auto;
+	gap: 14px;
+	padding: 10px 14px;
+}

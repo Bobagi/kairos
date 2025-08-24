@@ -1,0 +1,78 @@
+.fx-layer {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 3000;
+}
+.fx-card {
+	position: absolute;
+	aspect-ratio: 430/670;
+	border-radius: 10px;
+	overflow: hidden;
+	box-shadow:
+		0 10px 26px rgba(0, 0, 0, 0.42),
+		0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+	will-change: transform, opacity;
+}
+.fx-card img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+.loser-shake {
+	animation: loseShake 900ms ease-in-out infinite;
+	filter: grayscale(0.4) brightness(0.85);
+}
+.winner-glow {
+	animation: winPulse 1300ms ease-in-out infinite alternate;
+	filter: drop-shadow(0 0 12px rgba(255, 220, 120, 0.9));
+	z-index: 1;
+	border-radius: 10px;
+}
+@keyframes winPulse {
+	from {
+		transform: scale(1);
+	}
+	to {
+		transform: scale(1.05);
+	}
+}
+@keyframes loseShake {
+	0% {
+		transform: translateX(0);
+	}
+	25% {
+		transform: translateX(-2px);
+	}
+	50% {
+		transform: translateX(2px);
+	}
+	75% {
+		transform: translateX(-1px);
+	}
+	100% {
+		transform: translateX(0);
+	}
+}
+.slot-removable .result-wrap:hover {
+	animation: slotRemoveBlink 800ms linear infinite;
+}
+@keyframes slotRemoveBlink {
+	0% {
+		filter: drop-shadow(0 0 0 rgba(255, 0, 0, 0));
+	}
+	50% {
+		filter: drop-shadow(0 0 16px rgba(255, 0, 0, 0.9));
+	}
+	100% {
+		filter: drop-shadow(0 0 0 rgba(255, 0, 0, 0));
+	}
+}
+.result-wrap {
+	position: relative;
+	z-index: 2;
+	border-radius: 10px;
+}
