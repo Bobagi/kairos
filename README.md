@@ -35,6 +35,13 @@ npm run build
 
 You can preview the production build with `npm run preview`.
 
+cd /opt/kairos
+pm2 delete kairos-web || true
+pm2 start bash --name kairos-web -- -lc 'HOST=127.0.0.1 PORT=3055 NODE_ENV=production node build/index.js'
+pm2 save
+ss -ltnp | grep :3055
+curl -I http://127.0.0.1:3055
+
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
 
 ```bash
