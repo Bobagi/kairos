@@ -172,7 +172,7 @@
 	}
 
 	const AVATAR_PRIMARY = '/avatars/placeholder.png';
-	const AVATAR_FALLBACK = 'https://bobagi.click/images/cards/23.png';
+	const AVATAR_FALLBACK = 'https://bobagi.space/images/cards/23.png';
 	function onAvatarError(e: Event) {
 		const img = e.currentTarget as HTMLImageElement;
 		if (!img) return;
