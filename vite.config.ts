@@ -20,12 +20,12 @@ export default defineConfig(({ mode }) => {
 			},
 			proxy: {
 				'/game': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.click',
+					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
 					changeOrigin: true,
 					secure: true
 				},
 				'/auth': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.click',
+					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
 					changeOrigin: true,
 					secure: true
 				}

@@ -26,7 +26,7 @@ This guide explains how to access Prisma Studio running inside a Docker containe
 4. **From your local machine, create the SSH tunnel:**
 
    ```bash
-   ssh -N -L 5555:172.18.0.5:5555 root@bobagi.click
+   ssh -N -L 5555:172.18.0.5:5555 root@bobagi.space
    ```
 
 5. **Open Prisma Studio in your browser:**
