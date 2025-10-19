@@ -480,10 +480,32 @@
                 overlayCanvas.style.width = '100%';
                 overlayCanvas.style.height = '100%';
                 overlayCanvas.style.pointerEvents = 'none';
-                overlayCanvas.style.borderRadius = getComputedStyle(targetEl).borderRadius || '10px';
+                const targetBorderRadius = getComputedStyle(targetEl).borderRadius || '10px';
+                overlayCanvas.style.borderRadius = targetBorderRadius;
+                overlayCanvas.style.zIndex = '5';
                 overlayCanvas.style.mixBlendMode = mode === 'might' ? 'hard-light' : 'screen';
+                overlayCanvas.style.filter =
+                        mode === 'might'
+                                ? 'brightness(1.05) contrast(1.25) saturate(1.1)'
+                                : 'brightness(1.15) saturate(1.35)';
                 const overlayCtx = overlayCanvas.getContext('2d');
                 if (!overlayCtx) return;
+
+                const maskedContentWrapper = document.createElement('div');
+                maskedContentWrapper.className = 'defeat-mask-wrapper';
+                maskedContentWrapper.style.position = 'relative';
+                maskedContentWrapper.style.inset = '0';
+                maskedContentWrapper.style.width = '100%';
+                maskedContentWrapper.style.height = '100%';
+                maskedContentWrapper.style.borderRadius = targetBorderRadius;
+                maskedContentWrapper.style.overflow = 'hidden';
+                maskedContentWrapper.style.zIndex = '0';
+
+                while (targetEl.firstChild) {
+                        maskedContentWrapper.appendChild(targetEl.firstChild);
+                }
+                targetEl.appendChild(maskedContentWrapper);
+                targetEl.appendChild(overlayCanvas);
 
                 const maskCanvas = document.createElement('canvas');
                 maskCanvas.width = canvasWidth;
@@ -500,25 +522,15 @@
                         webkitMaskRepeat?: string;
                         webkitMaskPosition?: string;
                 };
-                const styleWithVendorMasks = targetEl.style as VendorMaskStyle;
+                const styleWithVendorMasks = maskedContentWrapper.style as VendorMaskStyle;
                 const originalPositionStyle = targetEl.style.position;
                 const computedPosition = getComputedStyle(targetEl).position;
-                const originalMaskImage = targetEl.style.maskImage;
-                const originalMaskSize = targetEl.style.maskSize;
-                const originalMaskRepeat = targetEl.style.maskRepeat;
-                const originalMaskPosition = targetEl.style.maskPosition;
-                const originalMaskMode = targetEl.style.maskMode;
-                const originalWebkitMaskImage = styleWithVendorMasks.webkitMaskImage;
-                const originalWebkitMaskSize = styleWithVendorMasks.webkitMaskSize;
-                const originalWebkitMaskRepeat = styleWithVendorMasks.webkitMaskRepeat;
-                const originalWebkitMaskPosition = styleWithVendorMasks.webkitMaskPosition;
                 if (!computedPosition || computedPosition === 'static') {
                         targetEl.style.position = 'relative';
                 }
 
                 targetEl.dataset.defeatEffectActive = '1';
                 targetEl.classList.add('defeat-active', `defeat-${mode}`);
-                targetEl.appendChild(overlayCanvas);
 
                 let maskPendingUpload = false;
                 let lastMaskUploadTimestamp = performance.now();
@@ -526,11 +538,11 @@
                 const applyMaskTexture = (stamp?: number) => {
                         if (!maskCtx) return;
                         const maskDataUrl = maskCanvas.toDataURL('image/png');
-                        targetEl.style.maskImage = `url(${maskDataUrl})`;
-                        targetEl.style.maskSize = '100% 100%';
-                        targetEl.style.maskRepeat = 'no-repeat';
-                        targetEl.style.maskPosition = '0 0';
-                        targetEl.style.maskMode = 'alpha';
+                        maskedContentWrapper.style.maskImage = `url(${maskDataUrl})`;
+                        maskedContentWrapper.style.maskSize = '100% 100%';
+                        maskedContentWrapper.style.maskRepeat = 'no-repeat';
+                        maskedContentWrapper.style.maskPosition = '0 0';
+                        maskedContentWrapper.style.maskMode = 'alpha';
                         styleWithVendorMasks.webkitMaskImage = `url(${maskDataUrl})`;
                         styleWithVendorMasks.webkitMaskSize = '100% 100%';
                         styleWithVendorMasks.webkitMaskRepeat = 'no-repeat';
@@ -899,17 +911,21 @@
                         targetEl.classList.remove('defeat-active', `defeat-${mode}`);
                         delete targetEl.dataset.defeatEffectActive;
                         if (maskCtx) {
-                                targetEl.style.maskImage = originalMaskImage;
-                                targetEl.style.maskSize = originalMaskSize;
-                                targetEl.style.maskRepeat = originalMaskRepeat;
-                                targetEl.style.maskPosition = originalMaskPosition;
-                                targetEl.style.maskMode = originalMaskMode;
-                                styleWithVendorMasks.webkitMaskImage = originalWebkitMaskImage ?? '';
-                                styleWithVendorMasks.webkitMaskSize = originalWebkitMaskSize ?? '';
-                                styleWithVendorMasks.webkitMaskRepeat = originalWebkitMaskRepeat ?? '';
-                                styleWithVendorMasks.webkitMaskPosition = originalWebkitMaskPosition ?? '';
+                                maskedContentWrapper.style.maskImage = '';
+                                maskedContentWrapper.style.maskSize = '';
+                                maskedContentWrapper.style.maskRepeat = '';
+                                maskedContentWrapper.style.maskPosition = '';
+                                maskedContentWrapper.style.maskMode = '';
+                                styleWithVendorMasks.webkitMaskImage = '';
+                                styleWithVendorMasks.webkitMaskSize = '';
+                                styleWithVendorMasks.webkitMaskRepeat = '';
+                                styleWithVendorMasks.webkitMaskPosition = '';
                         }
                         overlayCanvas.remove();
+                        while (maskedContentWrapper.firstChild) {
+                                targetEl.appendChild(maskedContentWrapper.firstChild);
+                        }
+                        maskedContentWrapper.remove();
                         fadeAnimation.removeEventListener('finish', cleanup);
                         if (!originalPositionStyle && computedPosition === 'static') {
                                 targetEl.style.position = '';
