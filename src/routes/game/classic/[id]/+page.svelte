@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { page as sveltePageStore } from '$app/stores';
-	import {
-		getCardMetas,
-		getGameResult,
-		getGameState,
-		playCard,
-		skipTurn
-	} from '$lib/api/GameClient';
+        import {
+                fetchChronosGameResult,
+                fetchChronosGameStateById,
+                fetchMultipleChronosCardMetadata,
+                playCardInChronosGame,
+                skipChronosGameTurn
+        } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import CenterPanel from '$lib/components/CenterPanel.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
@@ -88,23 +88,23 @@
 	}
 
 	let cardDetailsCacheByCode = new Map<string, CardDetails>();
-	async function ensureCodesCached(codes: string[]) {
-		const missing = codes.filter((c) => !cardDetailsCacheByCode.has(c));
-		if (!missing.length) return;
-		const metas = await getCardMetas(missing);
-		for (const m of metas) {
-			cardDetailsCacheByCode.set(m.code, {
-				code: m.code,
-				name: m.name,
-				description: m.description,
-				imageUrl: (m as any).image ?? (m as any).imageUrl,
-				might: m.might,
-				fire: m.fire,
-				magic: m.magic,
-				number: m.number
-			});
-		}
-	}
+        async function ensureCodesCached(codes: string[]) {
+                const missing = codes.filter((code) => !cardDetailsCacheByCode.has(code));
+                if (!missing.length) return;
+                const chronosCards = await fetchMultipleChronosCardMetadata(missing);
+                for (const chronosCard of chronosCards) {
+                        cardDetailsCacheByCode.set(chronosCard.code, {
+                                code: chronosCard.code,
+                                name: chronosCard.name,
+                                description: chronosCard.description,
+                                imageUrl: chronosCard.image,
+                                might: chronosCard.might,
+                                fire: chronosCard.fire,
+                                magic: chronosCard.magic,
+                                number: chronosCard.number
+                        });
+                }
+        }
 
 	async function fetchTemplate() {
 		try {
@@ -178,7 +178,7 @@
 	async function loadGameStateOrFinalResult() {
 		errorMessageText = null;
 		try {
-			const state = (await getGameState(currentGameId)) as GameState | null;
+                    const state = (await fetchChronosGameStateById(currentGameId)) as GameState | null;
 			if (state && typeof state === 'object') {
 				finalGameResult = null;
 				gameStateStore.set({ ...state, gameId: currentGameId });
@@ -237,7 +237,7 @@
 			}
 		} catch {}
 		try {
-			finalGameResult = await getGameResult(currentGameId);
+                    finalGameResult = await fetchChronosGameResult(currentGameId);
 		} catch {
 			errorMessageText = 'Could not load game state';
 		}
@@ -280,13 +280,15 @@
 				amount
 			});
 		}
-		playCard(currentGameId, $gameStateStore!.players[0], code).then(loadGameStateOrFinalResult);
+            playCardInChronosGame(currentGameId, $gameStateStore!.players[0], code).then(
+                    loadGameStateOrFinalResult
+            );
 	}
 
 	async function skipTurnClassic() {
 		if (isGameOver()) return;
 		const me = $gameStateStore?.players?.[0] ?? 'playerA';
-		await skipTurn(currentGameId, me);
+            await skipChronosGameTurn(currentGameId, me);
 		await loadGameStateOrFinalResult();
 	}
 

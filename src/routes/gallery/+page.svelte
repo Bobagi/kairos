@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { CardCatalogItem } from '$lib/api/GameClient';
-	import { listAllCards } from '$lib/api/GameClient';
+	import type { ChronosCardCatalogItem } from '$lib/api/GameClient';
+	import { fetchChronosCardCatalog } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import { onMount } from 'svelte';
 	import '../game/game.css';
@@ -10,8 +10,8 @@
 
 	let loading = true;
 	let errorMsg: string | null = null;
-	let cards: CardCatalogItem[] = [];
-	let selected: CardCatalogItem | null = null;
+	let cards: ChronosCardCatalogItem[] = [];
+	let selected: ChronosCardCatalogItem | null = null;
 
 	async function fetchTemplate() {
 		try {
@@ -30,8 +30,11 @@
 		errorMsg = null;
 		try {
 			await fetchTemplate();
-			const data = await listAllCards();
-			cards = data.map((c) => ({ ...c, imageUrl: (c as any).image ?? c.imageUrl }));
+	                const data = await fetchChronosCardCatalog();
+	                cards = data.map((card) => ({
+	                        ...card,
+	                        imageUrl: card.image ?? card.imageUrl
+	                }));
 		} catch (e) {
 			errorMsg = (e as Error).message;
 		} finally {
@@ -39,8 +42,8 @@
 		}
 	});
 
-	function openModal(c: CardCatalogItem) {
-		selected = c;
+	function openModal(c: ChronosCardCatalogItem) {
+	        selected = c;
 	}
 	function closeModal() {
 		selected = null;

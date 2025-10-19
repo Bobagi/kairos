@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { page as sveltePageStore } from '$app/stores';
-	import {
-		advanceDuel,
-		chooseAttributeForDuel,
-		chooseCardForDuel,
-		getCardMetas,
-		getGameResult,
-		getGameState,
-		listAllCards,
-		unchooseCardForDuel
-	} from '$lib/api/GameClient';
+        import type { ChronosCardCatalogItem } from '$lib/api/GameClient';
+        import {
+                advanceChronosDuel,
+                chooseChronosDuelAttribute,
+                chooseChronosDuelCard,
+                fetchChronosCardCatalog,
+                fetchChronosGameResult,
+                fetchChronosGameStateById,
+                fetchMultipleChronosCardMetadata,
+                unchooseChronosDuelCard
+        } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
 	import { game as gameStateStore, type GameState } from '$lib/stores/game';
@@ -38,11 +39,14 @@
 	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
 
-	let errorMessageText: string | null = null;
-	let finalGameResult: { winner: string | null; log: string[] } | null = null;
+        let errorMessageText: string | null = null;
+        let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
-	$: currentGameId = $sveltePageStore.params.id;
-	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+        $: currentGameId = $sveltePageStore.params.id;
+        $: currentDuelCenter = $gameStateStore?.duelCenter ?? null;
+        $: currentDuelStage = $gameStateStore?.duelStage ?? null;
+        $: currentDuelRoundWinner = currentDuelCenter?.roundWinner ?? null;
+        const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
 	type HandCardItem = {
 		code: string;
@@ -72,12 +76,49 @@
 	let centerSlotBElement: HTMLDivElement | null = null;
 	let lastDissolveCycleId: number | null = null;
 
-	let hasInitialStateLoaded = false;
-	let previousOppHandCount: number | null = null;
+        let hasInitialStateLoaded = false;
+        let previousOppHandCount: number | null = null;
 
-	let historyScrollContainerElement: HTMLDivElement | null = null;
-	let lastReturnedCode: string | null = null;
-	let lastAppliedLogLength = -1;
+        let playerA: string = 'playerA';
+        let playerB: string = 'playerB';
+        let playerAUsername: string = 'playerA';
+        let playerBUsername: string = 'playerB';
+
+        let historyScrollContainerElement: HTMLDivElement | null = null;
+        let lastReturnedCode: string | null = null;
+        let lastAppliedLogLength = -1;
+
+        type LogCategory = 'player' | 'opponent' | 'neutral';
+
+        function getLogPresentation(line: string): {
+                category: LogCategory;
+                icon: string;
+                text: string;
+        } {
+                const safeLine = line ?? '';
+                const normalizedLine = safeLine.toLowerCase();
+                const normalizedPlayer = (playerAUsername ?? '').toLowerCase();
+                const normalizedOpponent = (playerBUsername ?? '').toLowerCase();
+
+                if (normalizedPlayer && normalizedLine.includes(normalizedPlayer)) {
+                        return { category: 'player', icon: '🛡️', text: safeLine };
+                }
+                if (normalizedOpponent && normalizedLine.includes(normalizedOpponent)) {
+                        return { category: 'opponent', icon: '⚔️', text: safeLine };
+                }
+                return { category: 'neutral', icon: '✨', text: safeLine };
+        }
+
+        function isHighlightedAttribute(attr: 'magic' | 'might' | 'fire'): boolean {
+                if (!chooserCardDetails) return false;
+                const stats = {
+                        magic: chooserCardDetails.magic ?? 0,
+                        might: chooserCardDetails.might ?? 0,
+                        fire: chooserCardDetails.fire ?? 0
+                };
+                const highest = Math.max(stats.magic, stats.might, stats.fire);
+                return stats[attr] === highest && highest > 0;
+        }
 
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -103,84 +144,49 @@
 		return { items, created };
 	}
 
-	let cardDetailsCacheByCode = new Map<string, CardDetails>();
-	let catalogNumberByCode = new Map<string, number>();
-	let catalogLoaded = false;
+        let cardDetailsCacheByCode = new Map<string, CardDetails>();
+        let catalogNumberByCode = new Map<string, number>();
+        let catalogLoaded = false;
+        let chooserCardDetails: CardDetails | null = null;
 
-	async function ensureCatalogLoaded() {
-		if (catalogLoaded) return;
-		try {
-			const all = await listAllCards();
-			for (const c of all) {
-				const raw =
-					(c as any).number ??
-					(c as any).cardNumber ??
-					(c as any).cornerNumber ??
-					(c as any).meta?.number ??
-					(c as any).metadata?.number ??
-					(c as any).no ??
-					(c as any).idx ??
-					(c as any).id ??
-					null;
-				const parsed =
-					typeof raw === 'string'
-						? Number.parseInt(raw.replace(/[^\d]/g, ''), 10)
-						: Number.isFinite(raw)
-							? Number(raw)
-							: null;
-				if (parsed != null && !Number.isNaN(parsed)) {
-					catalogNumberByCode.set((c as any).code, parsed);
-				}
-			}
-		} finally {
-			catalogLoaded = true;
-		}
-	}
+        async function ensureCatalogLoaded() {
+                if (catalogLoaded) return;
+                try {
+                        const catalogEntries = await fetchChronosCardCatalog();
+                        for (const catalogEntry of catalogEntries) {
+                                catalogNumberByCode.set(catalogEntry.code, catalogEntry.number);
+                        }
+                } finally {
+                        catalogLoaded = true;
+                }
+        }
 
-	async function ensureCodesCached(codes: string[]) {
-		const missing = codes.filter((c) => {
-			const d = cardDetailsCacheByCode.get(c);
-			return !d || d.number == null || Number.isNaN(d.number as any);
-		});
-		if (!missing.length) return;
+        async function ensureCodesCached(codes: string[]) {
+                const missingCodes = codes.filter((code) => {
+                        const cachedCard = cardDetailsCacheByCode.get(code);
+                        return !cachedCard || Number.isNaN(cachedCard.number);
+                });
+                if (!missingCodes.length) return;
 
-		await ensureCatalogLoaded();
+                await ensureCatalogLoaded();
 
-		const metas = await getCardMetas(missing);
-		for (const m of metas) {
-			const code = (m as any).code;
-			const rawNum =
-				(m as any).number ??
-				(m as any).cardNumber ??
-				(m as any).cornerNumber ??
-				(m as any).meta?.number ??
-				(m as any).metadata?.number ??
-				(m as any).no ??
-				(m as any).idx ??
-				(m as any).id ??
-				null;
-			const parsedNum =
-				typeof rawNum === 'string'
-					? Number.parseInt(rawNum.replace(/[^\d]/g, ''), 10)
-					: Number.isFinite(rawNum)
-						? Number(rawNum)
-						: null;
-			const catalogNum = catalogNumberByCode.get(code) ?? null;
-			const finalNum = parsedNum ?? catalogNum ?? 0;
-
-			cardDetailsCacheByCode.set(code, {
-				code,
-				name: (m as any).name,
-				description: (m as any).description,
-				imageUrl: (m as any).image ?? (m as any).imageUrl,
-				might: (m as any).might,
-				fire: (m as any).fire,
-				magic: (m as any).magic,
-				number: finalNum
-			});
-		}
-		cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
-	}
+                const chronosCards = await fetchMultipleChronosCardMetadata(missingCodes);
+                for (const chronosCard of chronosCards) {
+                        const resolvedNumber =
+                                chronosCard.number || catalogNumberByCode.get(chronosCard.code) || 0;
+                        cardDetailsCacheByCode.set(chronosCard.code, {
+                                code: chronosCard.code,
+                                name: chronosCard.name,
+                                description: chronosCard.description,
+                                imageUrl: chronosCard.image,
+                                might: chronosCard.might,
+                                fire: chronosCard.fire,
+                                magic: chronosCard.magic,
+                                number: resolvedNumber
+                        });
+                }
+                cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
+        }
 
 	function startDrawFx(fromEl: Element | null, toEl: Element | null, copies: number): number {
 		if (!fromEl || !toEl || !fxLayerElement || copies <= 0) return 0;
@@ -244,7 +250,7 @@
 	async function loadGameStateOrFinalResult() {
 		errorMessageText = null;
 		try {
-			const state = (await getGameState(currentGameId)) as GameState | null;
+			const state = (await fetchChronosGameStateById(currentGameId)) as GameState | null;
 			if (state && typeof state === 'object') {
 				finalGameResult = null;
 				gameStateStore.set({ ...state, gameId: currentGameId });
@@ -294,7 +300,7 @@
 					advanceTimer = window.setTimeout(
 						async () => {
 							try {
-								await advanceDuel(currentGameId);
+								await advanceChronosDuel(currentGameId);
 							} finally {
 								await loadGameStateOrFinalResult();
 							}
@@ -341,7 +347,7 @@
 			}
 		} catch {}
 		try {
-			finalGameResult = await getGameResult(currentGameId);
+			finalGameResult = await fetchChronosGameResult(currentGameId);
 		} catch {
 			errorMessageText = 'Could not load game state';
 		}
@@ -358,7 +364,7 @@
 		if (state.duelCenter?.aCardCode) return;
 		if (state.duelStage !== 'PICK_CARD') return;
 		const me = state.players[0];
-		await chooseCardForDuel(currentGameId, me, cardCode);
+		await chooseChronosDuelCard(currentGameId, me, cardCode);
 		await loadGameStateOrFinalResult();
 	}
 
@@ -370,39 +376,42 @@
 		if (!state.duelCenter?.aCardCode) return;
 		const me = state.players[0];
 		lastReturnedCode = state.duelCenter.aCardCode || null;
-		await unchooseCardForDuel(currentGameId, me);
+		await unchooseChronosDuelCard(currentGameId, me);
 		await loadGameStateOrFinalResult();
 	}
 
 	async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
 		if (isGameOver()) return;
 		const me = $gameStateStore?.players?.[0] ?? 'playerA';
-		await chooseAttributeForDuel(currentGameId, me, attr);
+		await chooseChronosDuelAttribute(currentGameId, me, attr);
 		await loadGameStateOrFinalResult();
 	}
 
-	function detectChosenAttributeMode(center: any): 'fire' | 'magic' | 'might' {
-		const raw = (
-			center?.chosenAttr ??
-			center?.attribute ??
-			center?.attr ??
-			center?.chosenAttribute ??
-			center?.attributeName ??
-			''
-		)
-			.toString()
-			.toLowerCase();
-		if (raw.includes('mag')) return 'magic';
-		if (raw.includes('fire')) return 'fire';
-		if (
-			raw.includes('might') ||
-			raw.includes('strength') ||
-			raw.includes('power') ||
-			raw.includes('forc')
-		)
-			return 'might';
-		return 'fire';
-	}
+        function detectChosenAttributeMode(
+                center: GameState['duelCenter'] | null | undefined
+        ): 'fire' | 'magic' | 'might' {
+                const rawAttributeText = (
+                        center?.chosenAttribute ??
+                        center?.attribute ??
+                        center?.attributeName ??
+                        center?.attr ??
+                        center?.chosenAttr ??
+                        ''
+                )
+                        .toString()
+                        .toLowerCase();
+                if (rawAttributeText.includes('mag')) return 'magic';
+                if (rawAttributeText.includes('fire')) return 'fire';
+                if (
+                        rawAttributeText.includes('might') ||
+                        rawAttributeText.includes('strength') ||
+                        rawAttributeText.includes('power') ||
+                        rawAttributeText.includes('forc')
+                ) {
+                        return 'might';
+                }
+                return 'fire';
+        }
 
 	function startEdgeInwardDissolveOnElement(
 		targetEl: HTMLElement,
@@ -585,13 +594,13 @@
 		requestAnimationFrame(drawFrame);
 	}
 
-	function findLoserCenterElement(): HTMLElement | null {
-		const winner = ($gameStateStore?.duelCenter as any)?.roundWinner;
-		if (!winner) return null;
-		if (winner === playerA) return centerSlotBElement;
-		if (winner === playerB) return centerSlotAElement;
-		return null;
-	}
+        function findLoserCenterElement(): HTMLElement | null {
+                const winner = currentDuelRoundWinner;
+                if (!winner) return null;
+                if (winner === playerA) return centerSlotBElement;
+                if (winner === playerB) return centerSlotAElement;
+                return null;
+        }
 
 	onMount(async () => {
 		await loadGameStateOrFinalResult();
@@ -606,8 +615,8 @@
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
 	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
 	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
-	$: duelStage = $gameStateStore?.duelStage ?? null;
-	$: duelCenter = $gameStateStore?.duelCenter ?? null;
+	$: duelStage = currentDuelStage ?? null;
+	$: duelCenter = currentDuelCenter ?? null;
 	$: chooserId = duelCenter?.chooserId ?? playerA;
 	$: discardPiles = $gameStateStore?.discardPiles ?? null;
 	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
@@ -635,32 +644,44 @@
 	}
 	$: computeSpread();
 
-	$: canReturnSelectedCardToHand =
-		!($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
-		$gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
-		Boolean($gameStateStore?.duelCenter?.aCardCode) &&
-		$gameStateStore?.duelStage !== 'REVEAL' &&
-		($gameStateStore?.players?.[0] ?? '') === chooserId;
+        $: canReturnSelectedCardToHand =
+                !($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
+                $gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
+                Boolean(currentDuelCenter?.aCardCode) &&
+                currentDuelStage !== 'REVEAL' &&
+                ($gameStateStore?.players?.[0] ?? '') === chooserId;
 
-	$: historyLogLength = $gameStateStore?.log?.length ?? 0;
-	$: if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
-		lastAppliedLogLength = historyLogLength;
-		requestAnimationFrame(() => {
-			if (historyScrollContainerElement) {
-				historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
-			}
-		});
-	}
+        $: chooserCardDetails =
+                duelStage === 'PICK_ATTRIBUTE' &&
+                chooserId === playerA &&
+                currentDuelCenter?.aCardCode
+                        ? cardDetailsCacheByCode.get(currentDuelCenter.aCardCode) ?? null
+                        : null;
+
+        $: historyLogLength = $gameStateStore?.log?.length ?? 0;
+        $: {
+                if (historyLogLength < lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                }
+                if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                        requestAnimationFrame(() => {
+                                if (historyScrollContainerElement) {
+                                        historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
+                                }
+                        });
+                }
+        }
 
 	$: {
 		if (
 			duelStage === 'REVEAL' &&
-			($gameStateStore?.duelCenter as any)?.roundWinner &&
+			currentDuelRoundWinner &&
 			centerRevealCycle !== null &&
 			centerRevealCycle !== lastDissolveCycleId
 		) {
 			const loserEl = findLoserCenterElement();
-			const mode = detectChosenAttributeMode($gameStateStore?.duelCenter);
+			const mode = detectChosenAttributeMode(currentDuelCenter);
 			lastDissolveCycleId = centerRevealCycle;
 			if (loserEl) {
 				window.setTimeout(() => {
@@ -735,10 +756,10 @@
 						class:slot-removable={canReturnSelectedCardToHand}
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
-						{#if $gameStateStore?.duelCenter?.aCardCode}
+						{#if currentDuelCenter?.aCardCode}
 							<div
 								bind:this={centerSlotAElement}
-								class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
+								class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerA ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerA ? 'loser-shake' : ''}`}
 								on:click={onCenterCardReturnToHand}
 								title="Return card to hand"
 							>
@@ -777,18 +798,18 @@
 						class="duel-slot"
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
-						{#if $gameStateStore?.duelCenter?.bCardCode}
+						{#if currentDuelCenter?.bCardCode}
 							<div class="flip-wrap" data-cycle={centerRevealCycle}>
 								<div
 									class="flipper"
-									class:start-back={$gameStateStore?.duelStage !== 'REVEAL'}
-									class:animate={$gameStateStore?.duelStage === 'REVEAL'}
+									class:start-back={currentDuelStage !== 'REVEAL'}
+									class:animate={currentDuelStage === 'REVEAL'}
 									style={`--flip-ms:${FLIP_MS}ms;`}
 								>
 									<div class="face front">
 										<div
 											bind:this={centerSlotBElement}
-											class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerB ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerB ? 'loser-shake' : ''}`}
+											class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerB ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerB ? 'loser-shake' : ''}`}
 										>
 											<CardComposite
 												artImageUrl={cardDetailsCacheByCode.get(
@@ -838,15 +859,45 @@
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						<span>Choose attribute:</span>
 						<div>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}>
-								<img src="/icons/magic_icon.png" alt="Magic icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}>
-								<img src="/icons/strength_icon.png" alt="Might icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}>
-								<img src="/icons/fire_icon.png" alt="Fire icon" />
-							</button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('magic')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('magic')}
+                                                                title={`Choose magic (${chooserCardDetails?.magic ?? '–'})`}
+                                                                aria-label={`Choose magic (${chooserCardDetails?.magic ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/magic_icon.png" alt="Magic icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.magic}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('might')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('might')}
+                                                                title={`Choose might (${chooserCardDetails?.might ?? '–'})`}
+                                                                aria-label={`Choose might (${chooserCardDetails?.might ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/strength_icon.png" alt="Might icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.might}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('fire')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('fire')}
+                                                                title={`Choose fire (${chooserCardDetails?.fire ?? '–'})`}
+                                                                aria-label={`Choose fire (${chooserCardDetails?.fire ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/fire_icon.png" alt="Fire icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.fire}</span>
+                                                                {/if}
+                                                        </button>
 						</div>
 					</div>
 				{:else if duelStage === 'PICK_ATTRIBUTE'}
@@ -855,7 +906,7 @@
 					</div>
 				{/if}
 
-				{#if duelStage === 'REVEAL' && !($gameStateStore?.duelCenter as any)?.roundWinner}
+				{#if duelStage === 'REVEAL' && !currentDuelRoundWinner}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						Rodada empatada!
 					</div>
@@ -871,20 +922,22 @@
 					{/if}
 				</div>
 
-				{#if $gameStateStore?.log?.length}
-					<div class="history">
-						<div class="title">History</div>
-						<div
-							class="scroll"
-							style="flex-direction: column;"
-							bind:this={historyScrollContainerElement}
-						>
-							{#each $gameStateStore.log as line}
-								<div>{line}</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
+                                {#if $gameStateStore?.log?.length}
+                                        <div class="history">
+                                                <div class="title">History</div>
+                                                <div class="scroll" bind:this={historyScrollContainerElement}>
+                                                        {#each $gameStateStore.log as line, index (index)}
+                                                                {@const presentation = getLogPresentation(line)}
+                                                                <div class={`log-entry ${presentation.category}`}>
+                                                                        <span class="log-marker" aria-hidden="true">
+                                                                                {presentation.icon}
+                                                                        </span>
+                                                                        <span class="log-text">{presentation.text}</span>
+                                                                </div>
+                                                        {/each}
+                                                </div>
+                                        </div>
+                                {/if}
 			</div>
 		</div>
 	</section>
