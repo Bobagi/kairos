@@ -72,7 +72,93 @@
 	}
 }
 .result-wrap {
-	position: relative;
-	z-index: 2;
-	border-radius: 10px;
+        position: relative;
+        z-index: 2;
+        border-radius: 10px;
+}
+
+.result-wrap.defeat-active {
+        isolation: isolate;
+        overflow: visible;
+}
+
+.result-wrap.defeat-active::after {
+        content: '';
+        position: absolute;
+        inset: -18%;
+        border-radius: 18px;
+        opacity: 0;
+        pointer-events: none;
+        filter: blur(22px);
+        mix-blend-mode: screen;
+        transform: scale(0.9);
+        transition: opacity 140ms ease-out, transform 200ms ease-out;
+        z-index: -1;
+}
+
+.result-wrap.defeat-active.defeat-fire::after {
+        opacity: 0.85;
+        transform: scale(1);
+        background: radial-gradient(circle at 50% 70%, rgba(255, 110, 40, 0.9), rgba(80, 10, 0, 0));
+        animation: defeatFireAuraPulse 860ms ease-in-out infinite;
+}
+
+.result-wrap.defeat-active.defeat-magic::after {
+        opacity: 0.9;
+        transform: scale(1.05);
+        background: radial-gradient(circle at 50% 50%, rgba(130, 170, 255, 0.85), rgba(20, 0, 120, 0));
+        animation: defeatMagicAuraPulse 1s ease-in-out infinite;
+}
+
+.result-wrap.defeat-active.defeat-might::after {
+        opacity: 0.7;
+        transform: scale(1.08);
+        background: radial-gradient(circle at 50% 45%, rgba(255, 210, 120, 0.8), rgba(60, 30, 0, 0));
+        animation: defeatMightAuraPulse 780ms ease-in-out infinite;
+        mix-blend-mode: hard-light;
+}
+
+@keyframes defeatFireAuraPulse {
+        0% {
+                filter: blur(20px) hue-rotate(-6deg);
+                opacity: 0.7;
+        }
+        50% {
+                filter: blur(24px) hue-rotate(8deg);
+                opacity: 0.95;
+        }
+        100% {
+                filter: blur(20px) hue-rotate(-6deg);
+                opacity: 0.7;
+        }
+}
+
+@keyframes defeatMagicAuraPulse {
+        0% {
+                filter: blur(18px) saturate(1.1);
+                opacity: 0.75;
+        }
+        50% {
+                filter: blur(26px) saturate(1.4);
+                opacity: 1;
+        }
+        100% {
+                filter: blur(18px) saturate(1.1);
+                opacity: 0.75;
+        }
+}
+
+@keyframes defeatMightAuraPulse {
+        0% {
+                filter: blur(16px) brightness(0.95);
+                opacity: 0.6;
+        }
+        50% {
+                filter: blur(28px) brightness(1.2);
+                opacity: 0.85;
+        }
+        100% {
+                filter: blur(16px) brightness(0.95);
+                opacity: 0.6;
+        }
 }

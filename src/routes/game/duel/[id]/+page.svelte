@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { page as sveltePageStore } from '$app/stores';
-	import {
-		advanceDuel,
-		chooseAttributeForDuel,
-		chooseCardForDuel,
-		getCardMetas,
-		getGameResult,
-		getGameState,
-		listAllCards,
-		unchooseCardForDuel
-	} from '$lib/api/GameClient';
+        import type { ChronosCardCatalogItem } from '$lib/api/GameClient';
+        import {
+                advanceChronosDuel,
+                chooseChronosDuelAttribute,
+                chooseChronosDuelCard,
+                fetchChronosCardCatalog,
+                fetchChronosGameResult,
+                fetchChronosGameStateById,
+                fetchMultipleChronosCardMetadata,
+                unchooseChronosDuelCard
+        } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import DeckStack from '$lib/components/DeckStack.svelte';
 	import { game as gameStateStore, type GameState } from '$lib/stores/game';
@@ -19,8 +20,8 @@
 	export const REVEAL_PAUSE_MS = 3000;
 	export const DRAW_TRAVEL_MS = 420;
 	export const FLIP_MS = 500;
-	export const LOSER_SHAKE_BEFORE_DISSOLVE_MS = 2000;
-	export const DISSOLVE_DURATION_MS = 1800;
+        export const LOSER_SHAKE_BEFORE_DEFEAT_EFFECT_MS = 2000;
+        export const DEFEAT_EFFECT_DURATION_MS = 2200;
 	export const REVEAL_EXTRA_BUFFER_MS = 400;
 
 	type CardDetails = {
@@ -38,11 +39,14 @@
 	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
 
-	let errorMessageText: string | null = null;
-	let finalGameResult: { winner: string | null; log: string[] } | null = null;
+        let errorMessageText: string | null = null;
+        let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
-	$: currentGameId = $sveltePageStore.params.id;
-	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+        $: currentGameId = $sveltePageStore.params.id;
+        $: currentDuelCenter = $gameStateStore?.duelCenter ?? null;
+        $: currentDuelStage = $gameStateStore?.duelStage ?? null;
+        $: currentDuelRoundWinner = currentDuelCenter?.roundWinner ?? null;
+        const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
 	type HandCardItem = {
 		code: string;
@@ -70,14 +74,51 @@
 	let opponentHandContainerElement: HTMLDivElement | null = null;
 	let centerSlotAElement: HTMLDivElement | null = null;
 	let centerSlotBElement: HTMLDivElement | null = null;
-	let lastDissolveCycleId: number | null = null;
+        let lastDefeatEffectCycleId: number | null = null;
 
-	let hasInitialStateLoaded = false;
-	let previousOppHandCount: number | null = null;
+        let hasInitialStateLoaded = false;
+        let previousOppHandCount: number | null = null;
 
-	let historyScrollContainerElement: HTMLDivElement | null = null;
-	let lastReturnedCode: string | null = null;
-	let lastAppliedLogLength = -1;
+        let playerA: string = 'playerA';
+        let playerB: string = 'playerB';
+        let playerAUsername: string = 'playerA';
+        let playerBUsername: string = 'playerB';
+
+        let historyScrollContainerElement: HTMLDivElement | null = null;
+        let lastReturnedCode: string | null = null;
+        let lastAppliedLogLength = -1;
+
+        type LogCategory = 'player' | 'opponent' | 'neutral';
+
+        function getLogPresentation(line: string): {
+                category: LogCategory;
+                icon: string;
+                text: string;
+        } {
+                const safeLine = line ?? '';
+                const normalizedLine = safeLine.toLowerCase();
+                const normalizedPlayer = (playerAUsername ?? '').toLowerCase();
+                const normalizedOpponent = (playerBUsername ?? '').toLowerCase();
+
+                if (normalizedPlayer && normalizedLine.includes(normalizedPlayer)) {
+                        return { category: 'player', icon: '🛡️', text: safeLine };
+                }
+                if (normalizedOpponent && normalizedLine.includes(normalizedOpponent)) {
+                        return { category: 'opponent', icon: '⚔️', text: safeLine };
+                }
+                return { category: 'neutral', icon: '✨', text: safeLine };
+        }
+
+        function isHighlightedAttribute(attr: 'magic' | 'might' | 'fire'): boolean {
+                if (!chooserCardDetails) return false;
+                const stats = {
+                        magic: chooserCardDetails.magic ?? 0,
+                        might: chooserCardDetails.might ?? 0,
+                        fire: chooserCardDetails.fire ?? 0
+                };
+                const highest = Math.max(stats.magic, stats.might, stats.fire);
+                return stats[attr] === highest && highest > 0;
+        }
 
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -103,84 +144,49 @@
 		return { items, created };
 	}
 
-	let cardDetailsCacheByCode = new Map<string, CardDetails>();
-	let catalogNumberByCode = new Map<string, number>();
-	let catalogLoaded = false;
+        let cardDetailsCacheByCode = new Map<string, CardDetails>();
+        let catalogNumberByCode = new Map<string, number>();
+        let catalogLoaded = false;
+        let chooserCardDetails: CardDetails | null = null;
 
-	async function ensureCatalogLoaded() {
-		if (catalogLoaded) return;
-		try {
-			const all = await listAllCards();
-			for (const c of all) {
-				const raw =
-					(c as any).number ??
-					(c as any).cardNumber ??
-					(c as any).cornerNumber ??
-					(c as any).meta?.number ??
-					(c as any).metadata?.number ??
-					(c as any).no ??
-					(c as any).idx ??
-					(c as any).id ??
-					null;
-				const parsed =
-					typeof raw === 'string'
-						? Number.parseInt(raw.replace(/[^\d]/g, ''), 10)
-						: Number.isFinite(raw)
-							? Number(raw)
-							: null;
-				if (parsed != null && !Number.isNaN(parsed)) {
-					catalogNumberByCode.set((c as any).code, parsed);
-				}
-			}
-		} finally {
-			catalogLoaded = true;
-		}
-	}
+        async function ensureCatalogLoaded() {
+                if (catalogLoaded) return;
+                try {
+                        const catalogEntries = await fetchChronosCardCatalog();
+                        for (const catalogEntry of catalogEntries) {
+                                catalogNumberByCode.set(catalogEntry.code, catalogEntry.number);
+                        }
+                } finally {
+                        catalogLoaded = true;
+                }
+        }
 
-	async function ensureCodesCached(codes: string[]) {
-		const missing = codes.filter((c) => {
-			const d = cardDetailsCacheByCode.get(c);
-			return !d || d.number == null || Number.isNaN(d.number as any);
-		});
-		if (!missing.length) return;
+        async function ensureCodesCached(codes: string[]) {
+                const missingCodes = codes.filter((code) => {
+                        const cachedCard = cardDetailsCacheByCode.get(code);
+                        return !cachedCard || Number.isNaN(cachedCard.number);
+                });
+                if (!missingCodes.length) return;
 
-		await ensureCatalogLoaded();
+                await ensureCatalogLoaded();
 
-		const metas = await getCardMetas(missing);
-		for (const m of metas) {
-			const code = (m as any).code;
-			const rawNum =
-				(m as any).number ??
-				(m as any).cardNumber ??
-				(m as any).cornerNumber ??
-				(m as any).meta?.number ??
-				(m as any).metadata?.number ??
-				(m as any).no ??
-				(m as any).idx ??
-				(m as any).id ??
-				null;
-			const parsedNum =
-				typeof rawNum === 'string'
-					? Number.parseInt(rawNum.replace(/[^\d]/g, ''), 10)
-					: Number.isFinite(rawNum)
-						? Number(rawNum)
-						: null;
-			const catalogNum = catalogNumberByCode.get(code) ?? null;
-			const finalNum = parsedNum ?? catalogNum ?? 0;
-
-			cardDetailsCacheByCode.set(code, {
-				code,
-				name: (m as any).name,
-				description: (m as any).description,
-				imageUrl: (m as any).image ?? (m as any).imageUrl,
-				might: (m as any).might,
-				fire: (m as any).fire,
-				magic: (m as any).magic,
-				number: finalNum
-			});
-		}
-		cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
-	}
+                const chronosCards = await fetchMultipleChronosCardMetadata(missingCodes);
+                for (const chronosCard of chronosCards) {
+                        const resolvedNumber =
+                                chronosCard.number || catalogNumberByCode.get(chronosCard.code) || 0;
+                        cardDetailsCacheByCode.set(chronosCard.code, {
+                                code: chronosCard.code,
+                                name: chronosCard.name,
+                                description: chronosCard.description,
+                                imageUrl: chronosCard.image,
+                                might: chronosCard.might,
+                                fire: chronosCard.fire,
+                                magic: chronosCard.magic,
+                                number: resolvedNumber
+                        });
+                }
+                cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
+        }
 
 	function startDrawFx(fromEl: Element | null, toEl: Element | null, copies: number): number {
 		if (!fromEl || !toEl || !fxLayerElement || copies <= 0) return 0;
@@ -244,7 +250,7 @@
 	async function loadGameStateOrFinalResult() {
 		errorMessageText = null;
 		try {
-			const state = (await getGameState(currentGameId)) as GameState | null;
+			const state = (await fetchChronosGameStateById(currentGameId)) as GameState | null;
 			if (state && typeof state === 'object') {
 				finalGameResult = null;
 				gameStateStore.set({ ...state, gameId: currentGameId });
@@ -294,15 +300,17 @@
 					advanceTimer = window.setTimeout(
 						async () => {
 							try {
-								await advanceDuel(currentGameId);
+								await advanceChronosDuel(currentGameId);
 							} finally {
 								await loadGameStateOrFinalResult();
 							}
 						},
-						Math.max(
-							REVEAL_PAUSE_MS,
-							LOSER_SHAKE_BEFORE_DISSOLVE_MS + DISSOLVE_DURATION_MS + REVEAL_EXTRA_BUFFER_MS
-						)
+                                                Math.max(
+                                                        REVEAL_PAUSE_MS,
+                                                        LOSER_SHAKE_BEFORE_DEFEAT_EFFECT_MS +
+                                                                DEFEAT_EFFECT_DURATION_MS +
+                                                                REVEAL_EXTRA_BUFFER_MS
+                                                )
 					);
 				} else if (advanceTimer) {
 					window.clearTimeout(advanceTimer);
@@ -341,7 +349,7 @@
 			}
 		} catch {}
 		try {
-			finalGameResult = await getGameResult(currentGameId);
+			finalGameResult = await fetchChronosGameResult(currentGameId);
 		} catch {
 			errorMessageText = 'Could not load game state';
 		}
@@ -358,7 +366,7 @@
 		if (state.duelCenter?.aCardCode) return;
 		if (state.duelStage !== 'PICK_CARD') return;
 		const me = state.players[0];
-		await chooseCardForDuel(currentGameId, me, cardCode);
+		await chooseChronosDuelCard(currentGameId, me, cardCode);
 		await loadGameStateOrFinalResult();
 	}
 
@@ -370,228 +378,334 @@
 		if (!state.duelCenter?.aCardCode) return;
 		const me = state.players[0];
 		lastReturnedCode = state.duelCenter.aCardCode || null;
-		await unchooseCardForDuel(currentGameId, me);
+		await unchooseChronosDuelCard(currentGameId, me);
 		await loadGameStateOrFinalResult();
 	}
 
 	async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
 		if (isGameOver()) return;
 		const me = $gameStateStore?.players?.[0] ?? 'playerA';
-		await chooseAttributeForDuel(currentGameId, me, attr);
+		await chooseChronosDuelAttribute(currentGameId, me, attr);
 		await loadGameStateOrFinalResult();
 	}
 
-	function detectChosenAttributeMode(center: any): 'fire' | 'magic' | 'might' {
-		const raw = (
-			center?.chosenAttr ??
-			center?.attribute ??
-			center?.attr ??
-			center?.chosenAttribute ??
-			center?.attributeName ??
-			''
-		)
-			.toString()
-			.toLowerCase();
-		if (raw.includes('mag')) return 'magic';
-		if (raw.includes('fire')) return 'fire';
-		if (
-			raw.includes('might') ||
-			raw.includes('strength') ||
-			raw.includes('power') ||
-			raw.includes('forc')
-		)
-			return 'might';
-		return 'fire';
-	}
+        function detectChosenAttributeMode(
+                center: GameState['duelCenter'] | null | undefined
+        ): 'fire' | 'magic' | 'might' {
+                const rawAttributeText = (
+                        center?.chosenAttribute ??
+                        center?.attribute ??
+                        center?.attributeName ??
+                        center?.attr ??
+                        center?.chosenAttr ??
+                        ''
+                )
+                        .toString()
+                        .toLowerCase();
+                if (rawAttributeText.includes('mag')) return 'magic';
+                if (rawAttributeText.includes('fire')) return 'fire';
+                if (
+                        rawAttributeText.includes('might') ||
+                        rawAttributeText.includes('strength') ||
+                        rawAttributeText.includes('power') ||
+                        rawAttributeText.includes('forc')
+                ) {
+                        return 'might';
+                }
+                return 'fire';
+        }
 
-	function startEdgeInwardDissolveOnElement(
-		targetEl: HTMLElement,
-		mode: 'fire' | 'magic' | 'might',
-		durationMs: number = DISSOLVE_DURATION_MS
-	) {
-		const rect = targetEl.getBoundingClientRect();
-		const deviceScale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-		const canvasWidth = Math.max(2, Math.round(rect.width * deviceScale));
-		const canvasHeight = Math.max(2, Math.round(rect.height * deviceScale));
-		const overlayCanvas = document.createElement('canvas');
-		overlayCanvas.width = canvasWidth;
-		overlayCanvas.height = canvasHeight;
-		overlayCanvas.style.position = 'absolute';
-		overlayCanvas.style.inset = '0';
-		overlayCanvas.style.pointerEvents = 'none';
-		overlayCanvas.style.borderRadius = getComputedStyle(targetEl).borderRadius || '10px';
-		targetEl.appendChild(overlayCanvas);
-		const overlayCtx = overlayCanvas.getContext('2d', { willReadFrequently: true })!;
-		const maskCanvas = document.createElement('canvas');
-		maskCanvas.width = canvasWidth;
-		maskCanvas.height = canvasHeight;
-		const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true })!;
-		targetEl.style.webkitMaskSize = '100% 100%';
-		targetEl.style.maskSize = '100% 100%';
+        type FireDefeatParticle = {
+                type: 'fire';
+                px: number;
+                py: number;
+                vx: number;
+                vy: number;
+                life: number;
+                maxLife: number;
+                size: number;
+                flickerSpeed: number;
+        };
 
-		function seedRandom(seed: number) {
-			let t = seed >>> 0;
-			return function () {
-				t += 0x6d2b79f5;
-				let x = Math.imul(t ^ (t >>> 15), 1 | t);
-				x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
-				return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-			};
-		}
-		function createOctaveNoise(width: number, height: number, seed: number) {
-			const rand = seedRandom(seed);
-			const data = new Float32Array(width * height);
-			for (let i = 0; i < data.length; i++) data[i] = rand();
-			return { width, height, data };
-		}
-		function sampleBilinear(
-			oct: { width: number; height: number; data: Float32Array },
-			u: number,
-			v: number
-		) {
-			const x = (((u % 1) + 1) % 1) * (oct.width - 1);
-			const y = (((v % 1) + 1) % 1) * (oct.height - 1);
-			const x0 = Math.floor(x),
-				y0 = Math.floor(y);
-			const x1 = Math.min(x0 + 1, oct.width - 1),
-				y1 = Math.min(y0 + 1, oct.height - 1);
-			const tx = x - x0,
-				ty = y - y0;
-			const i00 = y0 * oct.width + x0;
-			const i10 = y0 * oct.width + x1;
-			const i01 = y1 * oct.width + x0;
-			const i11 = y1 * oct.width + x1;
-			const a = oct.data[i00] * (1 - tx) + oct.data[i10] * tx;
-			const b = oct.data[i01] * (1 - tx) + oct.data[i11] * tx;
-			return a * (1 - ty) + b * ty;
-		}
-		const noiseOctaves = [
-			createOctaveNoise(96, 96, 101),
-			createOctaveNoise(192, 192, 202),
-			createOctaveNoise(384, 384, 303)
-		];
-		function sampleFractal(u: number, v: number, t: number) {
-			const o0 = sampleBilinear(noiseOctaves[0], u + t * 0.03, v - t * 0.12);
-			const o1 = sampleBilinear(noiseOctaves[1], u * 2 - t * 0.03, v * 2 - t * 0.18);
-			const o2 = sampleBilinear(noiseOctaves[2], u * 4 + t * 0.02, v * 4 - t * 0.26);
-			return o0 * 0.6 + o1 * 0.3 + o2 * 0.1 - 0.5;
-		}
-		function clamp(v: number, a: number, b: number) {
-			return v < a ? a : v > b ? b : v;
-		}
-		function palette(mode: 'fire' | 'magic' | 'might', t: number): [number, number, number] {
-			if (mode === 'fire') {
-				const r = 255;
-				const g = Math.round(64 + (240 - 64) * t);
-				const b = Math.round(0 + (80 - 0) * t);
-				return [r, g, b];
-			}
-			if (mode === 'magic') {
-				const r = Math.round(40 + (120 - 40) * t);
-				const g = Math.round(80 + (200 - 80) * t);
-				const b = Math.round(160 + (255 - 160) * t);
-				return [r, g, b];
-			}
-			const r = Math.round(120 + (200 - 120) * t);
-			const g = Math.round(72 + (140 - 72) * t);
-			const b = Math.round(32 + (80 - 32) * t);
-			return [r, g, b];
-		}
+        type MagicDefeatParticle = {
+                type: 'magic';
+                angle: number;
+                radius: number;
+                angularVelocity: number;
+                radiusVelocity: number;
+                px: number;
+                py: number;
+                life: number;
+                maxLife: number;
+                size: number;
+        };
 
-		const maxEdgeDistance = Math.min(canvasWidth, canvasHeight) * 0.5;
-		const fireBandBaseWidth = 0.14;
-		const fireNoiseStrength = 0.33;
-		const innerFizzleWidth = 0.18;
-		const ovalShapeMix = 0.6;
-		const ovalVerticalScale = 0.85;
-		let startTimestamp = 0;
+        type MightDefeatParticle = {
+                type: 'might';
+                px: number;
+                py: number;
+                vx: number;
+                vy: number;
+                rotation: number;
+                rotationVelocity: number;
+                life: number;
+                maxLife: number;
+                width: number;
+                height: number;
+        };
 
-		function drawFrame(timestampMs: number) {
-			if (!startTimestamp) startTimestamp = timestampMs;
-			const elapsedMs = timestampMs - startTimestamp;
-			const tSec = elapsedMs / 1000;
-			const normalized = clamp(elapsedMs / durationMs, 0, 1);
-			const boostedProgress = normalized;
-			const overlayImage = overlayCtx.createImageData(canvasWidth, canvasHeight);
-			const overlayData = overlayImage.data;
-			const maskImage = maskCtx.createImageData(canvasWidth, canvasHeight);
-			const maskData = maskImage.data;
-			const centerX = canvasWidth * 0.5;
-			const centerY = canvasHeight * 0.5;
-			for (let y = 0; y < canvasHeight; y++) {
-				for (let x = 0; x < canvasWidth; x++) {
-					const di = (y * canvasWidth + x) * 4;
-					const dxToEdge = Math.min(x, canvasWidth - 1 - x);
-					const dyToEdge = Math.min(y, canvasHeight - 1 - y);
-					const rectDistance = Math.min(dxToEdge, dyToEdge);
-					const rectNorm = clamp(rectDistance / maxEdgeDistance, 0, 1);
-					const rx = (x - centerX) / (canvasWidth * 0.5);
-					const ry = (y - centerY) / (canvasHeight * 0.5);
-					const ellipseNorm = clamp(
-						1 - Math.sqrt(rx * rx + ry * ry * ovalVerticalScale * ovalVerticalScale),
-						0,
-						1
-					);
-					const edgeNormalized = rectNorm * (1 - ovalShapeMix) + ellipseNorm * ovalShapeMix;
-					const u = x / canvasWidth;
-					const v = y / canvasHeight;
-					const n = sampleFractal(u, v, tSec);
-					const maskValue = edgeNormalized + n * fireNoiseStrength;
-					const localBand = fireBandBaseWidth * (0.7 + 0.6 * (n + 0.5));
-					const delta = Math.abs(maskValue - boostedProgress);
-					const insideDepth = maskValue - boostedProgress;
-					let maskA = 0;
-					if (insideDepth > 0) {
-						const insideT = clamp(insideDepth / innerFizzleWidth, 0, 1);
-						maskA = Math.round(255 * insideT);
-					} else if (delta < localBand * 1.3) {
-						const edgeT = 1 - delta / (localBand * 1.3);
-						maskA = Math.round(255 * edgeT);
-					}
-					maskData[di] = 255;
-					maskData[di + 1] = 255;
-					maskData[di + 2] = 255;
-					maskData[di + 3] = maskA;
-					if (delta < localBand * 1.3) {
-						const te = 1 - delta / (localBand * 1.3);
-						const [fr, fg, fb] = palette(mode, te);
-						overlayData[di] = fr;
-						overlayData[di + 1] = fg;
-						overlayData[di + 2] = fb;
-						overlayData[di + 3] = Math.round(255 * te);
-					} else {
-						overlayData[di] = 0;
-						overlayData[di + 1] = 0;
-						overlayData[di + 2] = 0;
-						overlayData[di + 3] = 0;
-					}
-				}
-			}
-			overlayCtx.putImageData(overlayImage, 0, 0);
-			maskCtx.putImageData(maskImage, 0, 0);
-			const dataUrl = maskCanvas.toDataURL('image/png');
-			targetEl.style.webkitMaskImage = `url(${dataUrl})`;
-			targetEl.style.maskImage = `url(${dataUrl})`;
-			if (normalized < 1) {
-				requestAnimationFrame(drawFrame);
-			} else {
-				targetEl.style.opacity = '0';
-				targetEl.style.pointerEvents = 'none';
-				targetEl.style.webkitMaskImage = 'none';
-				targetEl.style.maskImage = 'none';
-				overlayCanvas.remove();
-			}
-		}
-		requestAnimationFrame(drawFrame);
-	}
+        type DefeatParticle = FireDefeatParticle | MagicDefeatParticle | MightDefeatParticle;
 
-	function findLoserCenterElement(): HTMLElement | null {
-		const winner = ($gameStateStore?.duelCenter as any)?.roundWinner;
-		if (!winner) return null;
-		if (winner === playerA) return centerSlotBElement;
-		if (winner === playerB) return centerSlotAElement;
-		return null;
-	}
+        function startAttributeThemedDefeatAnimationOnElement(
+                targetEl: HTMLElement,
+                mode: 'fire' | 'magic' | 'might',
+                durationMs: number = DEFEAT_EFFECT_DURATION_MS
+        ) {
+                if (!targetEl || targetEl.dataset.defeatEffectActive === '1') {
+                        return;
+                }
+                const boundingRect = targetEl.getBoundingClientRect();
+                const deviceScale = Math.max(1, Math.min(window.devicePixelRatio || 1, 2.5));
+                const canvasWidth = Math.max(2, Math.round(boundingRect.width * deviceScale));
+                const canvasHeight = Math.max(2, Math.round(boundingRect.height * deviceScale));
+                const overlayCanvas = document.createElement('canvas');
+                overlayCanvas.width = canvasWidth;
+                overlayCanvas.height = canvasHeight;
+                overlayCanvas.style.position = 'absolute';
+                overlayCanvas.style.inset = '0';
+                overlayCanvas.style.width = '100%';
+                overlayCanvas.style.height = '100%';
+                overlayCanvas.style.pointerEvents = 'none';
+                overlayCanvas.style.borderRadius = getComputedStyle(targetEl).borderRadius || '10px';
+                overlayCanvas.style.mixBlendMode = mode === 'might' ? 'hard-light' : 'screen';
+                const overlayCtx = overlayCanvas.getContext('2d');
+                if (!overlayCtx) return;
+
+                const originalPositionStyle = targetEl.style.position;
+                const computedPosition = getComputedStyle(targetEl).position;
+                if (!computedPosition || computedPosition === 'static') {
+                        targetEl.style.position = 'relative';
+                }
+
+                targetEl.dataset.defeatEffectActive = '1';
+                targetEl.classList.add('defeat-active', `defeat-${mode}`);
+                targetEl.appendChild(overlayCanvas);
+
+                const particleCount = Math.min(220, Math.max(90, Math.round((canvasWidth * canvasHeight) / 1100)));
+                const particles: DefeatParticle[] = [];
+
+                const spawnFireParticle = (): FireDefeatParticle => ({
+                        type: 'fire',
+                        px: Math.random(),
+                        py: 0.55 + Math.random() * 0.4,
+                        vx: (Math.random() - 0.5) * 0.18,
+                        vy: -0.45 - Math.random() * 0.35,
+                        life: 0,
+                        maxLife: 0.7 + Math.random() * 0.9,
+                        size: 0.05 + Math.random() * 0.09,
+                        flickerSpeed: 6 + Math.random() * 6
+                });
+
+                const spawnMagicParticle = (): MagicDefeatParticle => {
+                        const baseRadius = 0.06 + Math.random() * 0.32;
+                        return {
+                                type: 'magic',
+                                angle: Math.random() * Math.PI * 2,
+                                radius: baseRadius,
+                                angularVelocity: (Math.random() * 1.6 + 0.7) * (Math.random() > 0.5 ? 1 : -1),
+                                radiusVelocity: 0.18 + Math.random() * 0.25,
+                                px: 0.5,
+                                py: 0.5,
+                                life: 0,
+                                maxLife: 1.2 + Math.random() * 1.1,
+                                size: 0.05 + Math.random() * 0.08
+                        };
+                };
+
+                const spawnMightParticle = (): MightDefeatParticle => ({
+                        type: 'might',
+                        px: 0.25 + Math.random() * 0.5,
+                        py: 0.2 + Math.random() * 0.4,
+                        vx: (Math.random() - 0.5) * 0.75,
+                        vy: 0.55 + Math.random() * 0.65,
+                        rotation: (Math.random() - 0.5) * 0.6,
+                        rotationVelocity: (Math.random() - 0.5) * 5,
+                        life: 0,
+                        maxLife: 0.9 + Math.random() * 1.1,
+                        width: 0.05 + Math.random() * 0.12,
+                        height: 0.12 + Math.random() * 0.22
+                });
+
+                const buildParticle = (): DefeatParticle => {
+                        if (mode === 'fire') return spawnFireParticle();
+                        if (mode === 'magic') return spawnMagicParticle();
+                        return spawnMightParticle();
+                };
+
+                for (let i = 0; i < particleCount; i++) {
+                        particles.push(buildParticle());
+                }
+
+                const rotationTarget = mode === 'might' ? -8 : mode === 'magic' ? 4 : 9;
+                const translationTarget = mode === 'might' ? 18 : 12;
+                const scaleTarget = mode === 'might' ? 0.82 : 0.78;
+
+                let cleanedUp = false;
+                const fadeAnimation = targetEl.animate(
+                        [
+                                {
+                                        transform: 'translateZ(0) scale(1)',
+                                        filter: 'saturate(1) brightness(1)',
+                                        opacity: 1
+                                },
+                                {
+                                        transform: 'translateZ(0) translateY(6px) scale(0.94)',
+                                        filter: 'saturate(0.7) brightness(0.85)',
+                                        opacity: 0.68
+                                },
+                                {
+                                        transform: `translateZ(0) translateY(${translationTarget}px) rotate(${rotationTarget}deg) scale(${scaleTarget})`,
+                                        filter: 'saturate(0.2) brightness(0.55) blur(2px)',
+                                        opacity: 0
+                                }
+                        ],
+                        { duration: durationMs, easing: 'ease-in', fill: 'forwards' }
+                );
+
+                const startTimestamp = performance.now();
+                let lastTimestamp = startTimestamp;
+
+                const drawFrame = (timestamp: number) => {
+                        const elapsedMs = timestamp - startTimestamp;
+                        const deltaSeconds = Math.max(0.001, (timestamp - lastTimestamp) / 1000);
+                        lastTimestamp = timestamp;
+                        const normalized = Math.min(1, elapsedMs / durationMs);
+
+                        overlayCtx.globalCompositeOperation = 'source-over';
+                        overlayCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+                        overlayCtx.globalCompositeOperation = mode === 'might' ? 'source-over' : 'lighter';
+
+                        const centerX = 0.5;
+                        const centerY = 0.5;
+
+                        for (let i = 0; i < particles.length; i++) {
+                                const particle = particles[i];
+                                const lifeRatio = Math.min(1, particle.life / particle.maxLife);
+                                const remaining = 1 - lifeRatio;
+
+                                if (particle.type === 'fire') {
+                                        particle.life += deltaSeconds * (1.1 + normalized * 0.6);
+                                        particle.px += particle.vx * deltaSeconds;
+                                        particle.py += particle.vy * deltaSeconds * (0.9 + normalized * 0.7);
+                                        if (particle.py < -0.1 || particle.life >= particle.maxLife) {
+                                                particles[i] = spawnFireParticle();
+                                                continue;
+                                        }
+                                        const px = particle.px * canvasWidth;
+                                        const py = particle.py * canvasHeight;
+                                        const sizePx = particle.size * canvasWidth;
+                                        const flicker = 0.6 + Math.sin(timestamp / 1000 * particle.flickerSpeed) * 0.3;
+                                        const alpha = Math.min(1, remaining * 1.1) * 0.9 * flicker;
+                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.2, px, py, sizePx);
+                                        gradient.addColorStop(0, `rgba(255, 230, 160, ${alpha})`);
+                                        gradient.addColorStop(0.45, `rgba(255, 120, 40, ${alpha * 0.85})`);
+                                        gradient.addColorStop(1, 'rgba(70, 18, 0, 0)');
+                                        overlayCtx.fillStyle = gradient;
+                                        overlayCtx.fillRect(px - sizePx, py - sizePx, sizePx * 2, sizePx * 2);
+                                        continue;
+                                }
+
+                                if (particle.type === 'magic') {
+                                        particle.life += deltaSeconds;
+                                        particle.radius += particle.radiusVelocity * deltaSeconds * (0.9 + normalized * 0.4);
+                                        particle.angle += particle.angularVelocity * deltaSeconds;
+                                        const spiralLift = 0.04 + normalized * 0.08;
+                                        particle.py = centerY + Math.sin(particle.angle) * particle.radius * 0.7 - normalized * spiralLift;
+                                        particle.px = centerX + Math.cos(particle.angle) * particle.radius * 0.9;
+                                        if (particle.life >= particle.maxLife) {
+                                                particles[i] = spawnMagicParticle();
+                                                continue;
+                                        }
+                                        const px = particle.px * canvasWidth;
+                                        const py = particle.py * canvasHeight;
+                                        const sizePx = particle.size * canvasWidth;
+                                        const alpha = Math.min(1, remaining * 1.15);
+                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.2, px, py, sizePx);
+                                        gradient.addColorStop(0, `rgba(210, 240, 255, ${alpha})`);
+                                        gradient.addColorStop(0.5, `rgba(120, 150, 255, ${alpha * 0.7})`);
+                                        gradient.addColorStop(1, 'rgba(30, 0, 80, 0)');
+                                        overlayCtx.fillStyle = gradient;
+                                        overlayCtx.fillRect(px - sizePx, py - sizePx, sizePx * 2, sizePx * 2);
+                                        continue;
+                                }
+
+                                particle.life += deltaSeconds * (0.9 + normalized * 0.5);
+                                particle.vy += 1.4 * deltaSeconds;
+                                particle.px += particle.vx * deltaSeconds;
+                                particle.py += particle.vy * deltaSeconds;
+                                particle.rotation += particle.rotationVelocity * deltaSeconds;
+                                const offscreen =
+                                        particle.py > 1.2 || particle.px < -0.2 || particle.px > 1.2 || particle.life >= particle.maxLife;
+                                if (offscreen) {
+                                        particles[i] = spawnMightParticle();
+                                        continue;
+                                }
+                                const px = particle.px * canvasWidth;
+                                const py = particle.py * canvasHeight;
+                                const widthPx = particle.width * canvasWidth;
+                                const heightPx = particle.height * canvasHeight;
+                                const alpha = Math.min(1, remaining * 1.05);
+                                overlayCtx.save();
+                                overlayCtx.translate(px, py);
+                                overlayCtx.rotate(particle.rotation);
+                                overlayCtx.fillStyle = `rgba(200, 160, 110, ${alpha})`;
+                                overlayCtx.fillRect(-widthPx * 0.5, -heightPx * 0.5, widthPx, heightPx);
+                                overlayCtx.fillStyle = `rgba(120, 70, 30, ${alpha * 0.8})`;
+                                overlayCtx.fillRect(-widthPx * 0.5, -heightPx * 0.15, widthPx, heightPx * 0.3);
+                                overlayCtx.restore();
+                        }
+
+                        if (normalized < 1) {
+                                requestAnimationFrame(drawFrame);
+                        } else {
+                                cleanup();
+                        }
+                };
+
+                const cleanup = () => {
+                        if (cleanedUp) return;
+                        cleanedUp = true;
+                        if (typeof fadeAnimation.commitStyles === 'function') {
+                                fadeAnimation.commitStyles();
+                        }
+                        fadeAnimation.cancel();
+                        targetEl.style.opacity = '0';
+                        targetEl.style.transform = `translateZ(0) translateY(${translationTarget}px) scale(${scaleTarget})`;
+                        targetEl.style.filter = 'saturate(0.15) brightness(0.4) blur(2px)';
+                        targetEl.style.pointerEvents = 'none';
+                        targetEl.classList.remove('defeat-active', `defeat-${mode}`);
+                        delete targetEl.dataset.defeatEffectActive;
+                        overlayCanvas.remove();
+                        fadeAnimation.removeEventListener('finish', cleanup);
+                        if (!originalPositionStyle && computedPosition === 'static') {
+                                targetEl.style.position = '';
+                        } else {
+                                targetEl.style.position = originalPositionStyle;
+                        }
+                };
+
+                fadeAnimation.addEventListener('finish', cleanup);
+
+                requestAnimationFrame(drawFrame);
+        }
+
+        function findLoserCenterElement(): HTMLElement | null {
+                const winner = currentDuelRoundWinner;
+                if (!winner) return null;
+                if (winner === playerA) return centerSlotBElement;
+                if (winner === playerB) return centerSlotAElement;
+                return null;
+        }
 
 	onMount(async () => {
 		await loadGameStateOrFinalResult();
@@ -606,8 +720,8 @@
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
 	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
 	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
-	$: duelStage = $gameStateStore?.duelStage ?? null;
-	$: duelCenter = $gameStateStore?.duelCenter ?? null;
+	$: duelStage = currentDuelStage ?? null;
+	$: duelCenter = currentDuelCenter ?? null;
 	$: chooserId = duelCenter?.chooserId ?? playerA;
 	$: discardPiles = $gameStateStore?.discardPiles ?? null;
 	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
@@ -635,41 +749,57 @@
 	}
 	$: computeSpread();
 
-	$: canReturnSelectedCardToHand =
-		!($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
-		$gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
-		Boolean($gameStateStore?.duelCenter?.aCardCode) &&
-		$gameStateStore?.duelStage !== 'REVEAL' &&
-		($gameStateStore?.players?.[0] ?? '') === chooserId;
+        $: canReturnSelectedCardToHand =
+                !($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
+                $gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
+                Boolean(currentDuelCenter?.aCardCode) &&
+                currentDuelStage !== 'REVEAL' &&
+                ($gameStateStore?.players?.[0] ?? '') === chooserId;
 
-	$: historyLogLength = $gameStateStore?.log?.length ?? 0;
-	$: if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
-		lastAppliedLogLength = historyLogLength;
-		requestAnimationFrame(() => {
-			if (historyScrollContainerElement) {
-				historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
-			}
-		});
-	}
+        $: chooserCardDetails =
+                duelStage === 'PICK_ATTRIBUTE' &&
+                chooserId === playerA &&
+                currentDuelCenter?.aCardCode
+                        ? cardDetailsCacheByCode.get(currentDuelCenter.aCardCode) ?? null
+                        : null;
+
+        $: historyLogLength = $gameStateStore?.log?.length ?? 0;
+        $: {
+                if (historyLogLength < lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                }
+                if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                        requestAnimationFrame(() => {
+                                if (historyScrollContainerElement) {
+                                        historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
+                                }
+                        });
+                }
+        }
 
 	$: {
 		if (
 			duelStage === 'REVEAL' &&
-			($gameStateStore?.duelCenter as any)?.roundWinner &&
+			currentDuelRoundWinner &&
 			centerRevealCycle !== null &&
-			centerRevealCycle !== lastDissolveCycleId
-		) {
-			const loserEl = findLoserCenterElement();
-			const mode = detectChosenAttributeMode($gameStateStore?.duelCenter);
-			lastDissolveCycleId = centerRevealCycle;
-			if (loserEl) {
-				window.setTimeout(() => {
-					(loserEl as HTMLElement).style.animation = 'none';
-					startEdgeInwardDissolveOnElement(loserEl as HTMLElement, mode, DISSOLVE_DURATION_MS);
-				}, LOSER_SHAKE_BEFORE_DISSOLVE_MS);
-			}
-		}
-	}
+                        centerRevealCycle !== lastDefeatEffectCycleId
+                ) {
+                        const loserEl = findLoserCenterElement();
+                        const mode = detectChosenAttributeMode(currentDuelCenter);
+                        lastDefeatEffectCycleId = centerRevealCycle;
+                        if (loserEl) {
+                                window.setTimeout(() => {
+                                        (loserEl as HTMLElement).style.animation = 'none';
+                                        startAttributeThemedDefeatAnimationOnElement(
+                                                loserEl as HTMLElement,
+                                                mode,
+                                                DEFEAT_EFFECT_DURATION_MS
+                                        );
+                                }, LOSER_SHAKE_BEFORE_DEFEAT_EFFECT_MS);
+                        }
+                }
+        }
 
 	$: resolvedWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
 </script>
@@ -735,10 +865,10 @@
 						class:slot-removable={canReturnSelectedCardToHand}
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
-						{#if $gameStateStore?.duelCenter?.aCardCode}
+						{#if currentDuelCenter?.aCardCode}
 							<div
 								bind:this={centerSlotAElement}
-								class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerA ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerA ? 'loser-shake' : ''}`}
+								class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerA ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerA ? 'loser-shake' : ''}`}
 								on:click={onCenterCardReturnToHand}
 								title="Return card to hand"
 							>
@@ -777,18 +907,18 @@
 						class="duel-slot"
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
-						{#if $gameStateStore?.duelCenter?.bCardCode}
+						{#if currentDuelCenter?.bCardCode}
 							<div class="flip-wrap" data-cycle={centerRevealCycle}>
 								<div
 									class="flipper"
-									class:start-back={$gameStateStore?.duelStage !== 'REVEAL'}
-									class:animate={$gameStateStore?.duelStage === 'REVEAL'}
+									class:start-back={currentDuelStage !== 'REVEAL'}
+									class:animate={currentDuelStage === 'REVEAL'}
 									style={`--flip-ms:${FLIP_MS}ms;`}
 								>
 									<div class="face front">
 										<div
 											bind:this={centerSlotBElement}
-											class={`result-wrap ${$gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner === playerB ? 'winner-glow' : $gameStateStore?.duelStage === 'REVEAL' && ($gameStateStore?.duelCenter as any)?.roundWinner && ($gameStateStore?.duelCenter as any)?.roundWinner !== playerB ? 'loser-shake' : ''}`}
+											class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerB ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerB ? 'loser-shake' : ''}`}
 										>
 											<CardComposite
 												artImageUrl={cardDetailsCacheByCode.get(
@@ -838,15 +968,45 @@
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						<span>Choose attribute:</span>
 						<div>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}>
-								<img src="/icons/magic_icon.png" alt="Magic icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}>
-								<img src="/icons/strength_icon.png" alt="Might icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}>
-								<img src="/icons/fire_icon.png" alt="Fire icon" />
-							</button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('magic')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('magic')}
+                                                                title={`Choose magic (${chooserCardDetails?.magic ?? '–'})`}
+                                                                aria-label={`Choose magic (${chooserCardDetails?.magic ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/magic_icon.png" alt="Magic icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.magic}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('might')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('might')}
+                                                                title={`Choose might (${chooserCardDetails?.might ?? '–'})`}
+                                                                aria-label={`Choose might (${chooserCardDetails?.might ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/strength_icon.png" alt="Might icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.might}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('fire')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('fire')}
+                                                                title={`Choose fire (${chooserCardDetails?.fire ?? '–'})`}
+                                                                aria-label={`Choose fire (${chooserCardDetails?.fire ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/fire_icon.png" alt="Fire icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.fire}</span>
+                                                                {/if}
+                                                        </button>
 						</div>
 					</div>
 				{:else if duelStage === 'PICK_ATTRIBUTE'}
@@ -855,7 +1015,7 @@
 					</div>
 				{/if}
 
-				{#if duelStage === 'REVEAL' && !($gameStateStore?.duelCenter as any)?.roundWinner}
+				{#if duelStage === 'REVEAL' && !currentDuelRoundWinner}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						Rodada empatada!
 					</div>
@@ -871,20 +1031,22 @@
 					{/if}
 				</div>
 
-				{#if $gameStateStore?.log?.length}
-					<div class="history">
-						<div class="title">History</div>
-						<div
-							class="scroll"
-							style="flex-direction: column;"
-							bind:this={historyScrollContainerElement}
-						>
-							{#each $gameStateStore.log as line}
-								<div>{line}</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
+                                {#if $gameStateStore?.log?.length}
+                                        <div class="history">
+                                                <div class="title">History</div>
+                                                <div class="scroll" bind:this={historyScrollContainerElement}>
+                                                        {#each $gameStateStore.log as line, index (index)}
+                                                                {@const presentation = getLogPresentation(line)}
+                                                                <div class={`log-entry ${presentation.category}`}>
+                                                                        <span class="log-marker" aria-hidden="true">
+                                                                                {presentation.icon}
+                                                                        </span>
+                                                                        <span class="log-text">{presentation.text}</span>
+                                                                </div>
+                                                        {/each}
+                                                </div>
+                                        </div>
+                                {/if}
 			</div>
 		</div>
 	</section>
