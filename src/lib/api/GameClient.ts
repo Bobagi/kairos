@@ -1,233 +1,409 @@
 // src/lib/api/GameClient.ts
-import type { Card } from '$lib/stores/game';
+import type { Card, GameState } from '$lib/stores/game';
 
-const API_BASE: string = (import.meta as any).env.DEV
-	? ''
-	: ((import.meta as any).env.VITE_API_BASE_URL ?? '');
-
-async function api<T = any>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
-	const url = `${API_BASE}${path}`;
-	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
-		...(init.headers as any)
-	};
-	if (token) headers.Authorization = `Bearer ${token}`;
-	const res = await fetch(url, { ...init, headers });
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw new Error(`${init.method ?? 'GET'} ${path} → ${res.status} ${body}`);
-	}
-	const ctype = res.headers.get('content-type') ?? '';
-	return (ctype.includes('application/json') ? res.json() : (null as any)) as T;
+interface KairosRuntimeEnvironmentVariables extends ImportMetaEnv {
+        VITE_API_BASE_URL?: string;
 }
 
-/* ---------- Tipos ---------- */
+const runtimeEnvironmentVariables = import.meta.env as KairosRuntimeEnvironmentVariables;
+const chronosApiBaseUrl: string = runtimeEnvironmentVariables.DEV
+        ? ''
+        : runtimeEnvironmentVariables.VITE_API_BASE_URL ?? '';
+
+function normalizeHeadersInitToObject(headersInit?: HeadersInit): Record<string, string> {
+        if (!headersInit) {
+                return {};
+        }
+        if (headersInit instanceof Headers) {
+                return Object.fromEntries(headersInit.entries());
+        }
+        if (Array.isArray(headersInit)) {
+                return Object.fromEntries(headersInit);
+        }
+        return { ...headersInit };
+}
+
+async function performChronosApiRequestReturningJson<T = unknown>(
+        path: string,
+        init: RequestInit = {},
+        token?: string
+): Promise<T> {
+        const url = `${chronosApiBaseUrl}${path}`;
+        const combinedHeaders: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...normalizeHeadersInitToObject(init.headers)
+        };
+        if (token) {
+                combinedHeaders.Authorization = `Bearer ${token}`;
+        }
+        const response = await fetch(url, { ...init, headers: combinedHeaders });
+        if (!response.ok) {
+                const body = await response.text().catch(() => '');
+                throw new Error(`${init.method ?? 'GET'} ${path} → ${response.status} ${body}`);
+        }
+        const contentType = response.headers.get('content-type') ?? '';
+        if (contentType.includes('application/json')) {
+                return (await response.json()) as T;
+        }
+        return null as unknown as T;
+}
+
+/* ---------- Types ---------- */
 export type GameMode = 'CLASSIC' | 'ATTRIBUTE_DUEL';
 export type GameSummary = { id: string; playerAId: string; mode: GameMode };
 export type GameResult = { winner: string | null; log: string[] };
 
-type RawCard = {
-	code: string;
-	name: string;
-	description: string;
-	imageUrl: string;
-	damage?: number | null;
-	heal?: number | null;
-	fire?: number | null;
-	might?: number | null;
-	magic?: number | null;
+type ChronosRawCardMetadata = {
+        number?: number | string | null;
+} | null;
+
+type ChronosRawCardPayload = {
+        code: string;
+        name: string;
+        description?: string | null;
+        imageUrl: string;
+        damage?: number | null;
+        heal?: number | null;
+        fire?: number | null;
+        might?: number | null;
+        magic?: number | null;
+        number?: number | string | null;
+        cardNumber?: number | string | null;
+        cornerNumber?: number | string | null;
+        meta?: ChronosRawCardMetadata;
+        metadata?: ChronosRawCardMetadata;
+        no?: number | string | null;
+        idx?: number | string | null;
+        id?: number | string | null;
 };
 
-function normalizeCard(raw: RawCard): Card {
-	return {
-		code: raw.code,
-		name: raw.name,
-		description: raw.description ?? '',
-		image: raw.imageUrl,
-		damage: raw.damage ?? 0,
-		heal: raw.heal ?? 0,
-		fire: raw.fire ?? 0,
-		might: raw.might ?? 0,
-		magic: raw.magic ?? 0
-	};
+function resolveCardNumberFromChronosRawCardPayload(rawChronosCard: ChronosRawCardPayload): number {
+        const possibleValues: Array<number | string | null | undefined> = [
+                rawChronosCard.number,
+                rawChronosCard.cardNumber,
+                rawChronosCard.cornerNumber,
+                rawChronosCard.meta?.number,
+                rawChronosCard.metadata?.number,
+                rawChronosCard.no,
+                rawChronosCard.idx,
+                rawChronosCard.id
+        ];
+        for (const value of possibleValues) {
+                if (value === null || value === undefined) {
+                        continue;
+                }
+                const parsedNumber = typeof value === 'number' ? value : Number(value);
+                if (!Number.isNaN(parsedNumber)) {
+                        return parsedNumber;
+                }
+        }
+        return 0;
+}
+
+function convertChronosRawCardPayloadToCard(rawChronosCard: ChronosRawCardPayload): Card {
+        return {
+                code: rawChronosCard.code,
+                name: rawChronosCard.name,
+                description: rawChronosCard.description ?? '',
+                image: rawChronosCard.imageUrl,
+                damage: rawChronosCard.damage ?? 0,
+                heal: rawChronosCard.heal ?? 0,
+                fire: rawChronosCard.fire ?? 0,
+                might: rawChronosCard.might ?? 0,
+                magic: rawChronosCard.magic ?? 0,
+                number: resolveCardNumberFromChronosRawCardPayload(rawChronosCard)
+        };
 }
 
 /* ---------- Health ---------- */
-export async function health(): Promise<string> {
-	const res = await fetch(`${API_BASE}/game/test`);
-	if (!res.ok) throw new Error(`Health-check failed: ${res.status}`);
-	return res.text();
+export async function checkChronosHealthStatus(): Promise<string> {
+        const response = await fetch(`${chronosApiBaseUrl}/game/test`);
+        if (!response.ok) throw new Error(`Health-check failed: ${response.status}`);
+        return response.text();
 }
 
 /* ---------- Auth ---------- */
-export async function register(username: string, password: string) {
-	return api<{
-		accessToken: string;
-		user: { id: string; username: string; role: 'USER' | 'ADMIN' };
-	}>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) });
+export async function registerChronosUserAccount(
+        username: string,
+        password: string
+): Promise<{
+        accessToken: string;
+        user: { id: string; username: string; role: 'USER' | 'ADMIN' };
+}> {
+        return performChronosApiRequestReturningJson(
+                '/auth/register',
+                { method: 'POST', body: JSON.stringify({ username, password }) }
+        );
 }
-export async function login(username: string, password: string) {
-	return api<{
-		accessToken: string;
-		user: { id: string; username: string; role: 'USER' | 'ADMIN' };
-	}>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+
+export async function loginChronosUserAccount(
+        username: string,
+        password: string
+): Promise<{
+        accessToken: string;
+        user: { id: string; username: string; role: 'USER' | 'ADMIN' };
+}> {
+        return performChronosApiRequestReturningJson(
+                '/auth/login',
+                { method: 'POST', body: JSON.stringify({ username, password }) }
+        );
 }
-export async function me(token: string) {
-	return api<{ id: string; username: string; role: 'USER' | 'ADMIN' }>('/auth/me', {}, token);
+
+export async function fetchAuthenticatedChronosUserProfile(
+        token: string
+): Promise<{ id: string; username: string; role: 'USER' | 'ADMIN' }> {
+        return performChronosApiRequestReturningJson('/auth/me', {}, token);
 }
 
 /* ---------- Start / End ---------- */
-export async function startClassicGame(playerAId: string) {
-	return api<{ gameId: string }>('/game/start-classic', {
-		method: 'POST',
-		body: JSON.stringify({ playerAId })
-	});
+export async function startClassicChronosGameForPlayer(
+        playerIdentifier: string
+): Promise<{ gameId: string }> {
+        return performChronosApiRequestReturningJson(
+                '/game/start-classic',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerAId: playerIdentifier })
+                }
+        );
 }
-export async function startDuelGame(playerAId: string) {
-	return api<{ gameId: string }>('/game/start-duel', {
-		method: 'POST',
-		body: JSON.stringify({ playerAId })
-	});
+
+export async function startAttributeDuelChronosGameForPlayer(
+        playerIdentifier: string
+): Promise<{ gameId: string }> {
+        return performChronosApiRequestReturningJson(
+                '/game/start-duel',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerAId: playerIdentifier })
+                }
+        );
 }
-export async function startGame(playerAId: string) {
-	return api<{ gameId: string }>('/game/start', {
-		method: 'POST',
-		body: JSON.stringify({ playerAId })
-	});
+
+export async function startChronosGameWithAutomaticModeSelection(
+        playerIdentifier: string
+): Promise<{ gameId: string }> {
+        return performChronosApiRequestReturningJson(
+                '/game/start',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerAId: playerIdentifier })
+                }
+        );
 }
-export async function endGameOnServer(gameId: string, token?: string) {
-	return api(`/game/end/${encodeURIComponent(gameId)}`, { method: 'DELETE' }, token);
+
+export async function endChronosGameSessionOnServer(
+        gameIdentifier: string,
+        token?: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/game/end/${encodeURIComponent(gameIdentifier)}`,
+                { method: 'DELETE' },
+                token
+        );
 }
 
 /* ---------- State / Result ---------- */
-export async function getGameState(gameId: string): Promise<any | null> {
-	const res = await fetch(`${API_BASE}/game/state/${encodeURIComponent(gameId)}`);
-	if (!res.ok) throw new Error(`Failed to fetch game state: ${res.status}`);
-	return res.json();
+export async function fetchChronosGameStateById(
+        gameIdentifier: string
+): Promise<GameState | null> {
+        const response = await fetch(
+                `${chronosApiBaseUrl}/game/state/${encodeURIComponent(gameIdentifier)}`
+        );
+        if (!response.ok) throw new Error(`Failed to fetch game state: ${response.status}`);
+        return (await response.json()) as GameState | null;
 }
-export async function getGameResult(gameId: string) {
-	return api<GameResult>(`/game/result/${encodeURIComponent(gameId)}`);
+
+export async function fetchChronosGameResult(gameIdentifier: string): Promise<GameResult> {
+        return performChronosApiRequestReturningJson(`/game/result/${encodeURIComponent(gameIdentifier)}`);
 }
 
 /* ---------- Classic actions ---------- */
-export async function playCard(gameId: string, playerId: string, cardCode: string) {
-	return api('/game/play-card', {
-		method: 'POST',
-		body: JSON.stringify({ gameId, player: playerId, card: cardCode })
-	});
+export async function playCardInChronosGame(
+        gameIdentifier: string,
+        playerIdentifier: string,
+        cardCode: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/game/play-card',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({
+                                gameId: gameIdentifier,
+                                player: playerIdentifier,
+                                card: cardCode
+                        })
+                }
+        );
 }
-export async function skipTurn(gameId: string, playerId: string) {
-	return api('/game/skip-turn', {
-		method: 'POST',
-		body: JSON.stringify({ gameId, player: playerId })
-	});
+
+export async function skipChronosGameTurn(
+        gameIdentifier: string,
+        playerIdentifier: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/game/skip-turn',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ gameId: gameIdentifier, player: playerIdentifier })
+                }
+        );
 }
 
 /* ---------- Duel actions ---------- */
-export async function chooseCardForDuel(gameId: string, playerId: string, cardCode: string) {
-	return api(`/game/${encodeURIComponent(gameId)}/duel/choose-card`, {
-		method: 'POST',
-		body: JSON.stringify({ playerId, cardCode })
-	});
+export async function chooseChronosDuelCard(
+        gameIdentifier: string,
+        playerIdentifier: string,
+        cardCode: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/game/${encodeURIComponent(gameIdentifier)}/duel/choose-card`,
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerId: playerIdentifier, cardCode })
+                }
+        );
 }
-export async function chooseAttributeForDuel(
-	gameId: string,
-	playerId: string,
-	attribute: 'magic' | 'might' | 'fire'
-) {
-	return api(`/game/${encodeURIComponent(gameId)}/duel/choose-attribute`, {
-		method: 'POST',
-		body: JSON.stringify({ playerId, attribute })
-	});
+
+export async function chooseChronosDuelAttribute(
+        gameIdentifier: string,
+        playerIdentifier: string,
+        attribute: 'magic' | 'might' | 'fire'
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/game/${encodeURIComponent(gameIdentifier)}/duel/choose-attribute`,
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerId: playerIdentifier, attribute })
+                }
+        );
 }
-export async function unchooseCardForDuel(gameId: string, playerId: string) {
-	return api(`/game/${encodeURIComponent(gameId)}/duel/unchoose-card`, {
-		method: 'POST',
-		body: JSON.stringify({ playerId })
-	});
+
+export async function unchooseChronosDuelCard(
+        gameIdentifier: string,
+        playerIdentifier: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/game/${encodeURIComponent(gameIdentifier)}/duel/unchoose-card`,
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ playerId: playerIdentifier })
+                }
+        );
 }
-export async function advanceDuel(gameId: string) {
-	return api(`/game/${encodeURIComponent(gameId)}/duel/advance`, { method: 'POST' });
-}
-export async function advanceDuelRound(gameId: string) {
-	return api(`/game/${encodeURIComponent(gameId)}/duel/advance`, { method: 'POST' });
+
+export async function advanceChronosDuel(gameIdentifier: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/game/${encodeURIComponent(gameIdentifier)}/duel/advance`,
+                { method: 'POST' }
+        );
 }
 
 /* ---------- Cards ---------- */
-const cache = new Map<string, Card>();
-export async function getCardMeta(code: string): Promise<Card> {
-	if (cache.has(code)) return cache.get(code)!;
-	try {
-		const raw = await api<RawCard>(`/game/cards/${encodeURIComponent(code)}`);
-		const norm = normalizeCard(raw);
-		cache.set(code, norm);
-		return norm;
-	} catch {
-		const all = await api<RawCard[]>('/game/cards');
-		const found = all.find((c) => c.code === code);
-		if (!found) throw new Error(`Card ${code} not found`);
-		const norm = normalizeCard(found);
-		cache.set(code, norm);
-		return norm;
-	}
+const chronosCardMetadataCache = new Map<string, Card>();
+export async function fetchChronosCardMetadata(cardCode: string): Promise<Card> {
+        const cachedCard = chronosCardMetadataCache.get(cardCode);
+        if (cachedCard) return cachedCard;
+        try {
+                const rawCard = await performChronosApiRequestReturningJson<ChronosRawCardPayload>(
+                        `/game/cards/${encodeURIComponent(cardCode)}`
+                );
+                const normalizedCard = convertChronosRawCardPayloadToCard(rawCard);
+                chronosCardMetadataCache.set(cardCode, normalizedCard);
+                return normalizedCard;
+        } catch {
+                const allCards = await performChronosApiRequestReturningJson<ChronosRawCardPayload[]>(
+                        '/game/cards'
+                );
+                const foundCard = allCards.find((card) => card.code === cardCode);
+                if (!foundCard) throw new Error(`Card ${cardCode} not found`);
+                const normalizedCard = convertChronosRawCardPayloadToCard(foundCard);
+                chronosCardMetadataCache.set(cardCode, normalizedCard);
+                return normalizedCard;
+        }
 }
-export async function getCardMetas(codes: string[]): Promise<Card[]> {
-	const missing = codes.filter((c) => !cache.has(c));
-	if (missing.length) {
-		try {
-			const qs = encodeURIComponent(missing.join(','));
-			const raw = await api<RawCard[]>(`/game/cards?codes=${qs}`);
-			for (const r of raw) cache.set(r.code, normalizeCard(r));
-		} catch {
-			const all = await api<RawCard[]>('/game/cards');
-			for (const code of missing) {
-				const r = all.find((x) => x.code === code);
-				if (r) cache.set(code, normalizeCard(r as any));
-			}
-		}
-	}
-	return codes.map((c) => cache.get(c)!).filter(Boolean);
+export async function fetchMultipleChronosCardMetadata(cardCodes: string[]): Promise<Card[]> {
+        const cardCodesMissingFromCache = cardCodes.filter(
+                (candidateCode) => !chronosCardMetadataCache.has(candidateCode)
+        );
+        if (cardCodesMissingFromCache.length) {
+                try {
+                        const queryString = encodeURIComponent(cardCodesMissingFromCache.join(','));
+                        const rawCards = await performChronosApiRequestReturningJson<ChronosRawCardPayload[]>(
+                                `/game/cards?codes=${queryString}`
+                        );
+                        for (const rawCard of rawCards) {
+                                chronosCardMetadataCache.set(
+                                        rawCard.code,
+                                        convertChronosRawCardPayloadToCard(rawCard)
+                                );
+                        }
+                } catch {
+                        const allCards = await performChronosApiRequestReturningJson<ChronosRawCardPayload[]>(
+                                '/game/cards'
+                        );
+                        for (const missingCode of cardCodesMissingFromCache) {
+                                const fallbackCard = allCards.find(
+                                        (candidateCard) => candidateCard.code === missingCode
+                                );
+                                if (fallbackCard) {
+                                        chronosCardMetadataCache.set(
+                                                missingCode,
+                                                convertChronosRawCardPayloadToCard(fallbackCard)
+                                        );
+                                }
+                        }
+                }
+        }
+        const resolvedCards: Card[] = [];
+        for (const cardCode of cardCodes) {
+                const cachedCard = chronosCardMetadataCache.get(cardCode);
+                if (cachedCard) {
+                        resolvedCards.push(cachedCard);
+                }
+        }
+        return resolvedCards;
 }
 
-// lista apenas os jogos do usuário autenticado
-export async function listMyActive(token: string) {
-	const r = await fetch(`${API_BASE}/game/active/mine`, {
-		headers: { Authorization: `Bearer ${token}` }
-	});
-	if (!r.ok) return [];
-	return r.json();
+// list only the games belonging to the authenticated user
+export async function listAuthenticatedChronosPlayerActiveGames(
+        token: string
+): Promise<GameSummary[]> {
+        const response = await fetch(`${chronosApiBaseUrl}/game/active/mine`, {
+                headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) return [];
+        return (await response.json()) as GameSummary[];
 }
 
-/* ---------- Actives (admin) ---------- */
-export async function listActive(token?: string) {
-	return api<GameSummary[]>('/game/active', {}, token);
-}
-export async function listActiveRaw(token?: string) {
-	return listActive(token);
-}
-export async function expireGames(token?: string) {
-	return api('/game/expire', { method: 'POST' }, token);
+/* ---------- Active games (admin) ---------- */
+export async function listAllActiveChronosGames(token?: string): Promise<GameSummary[]> {
+        return performChronosApiRequestReturningJson('/game/active', {}, token);
 }
 
-/* ---------- Estatísticas ---------- */
-export async function myStats(
-	token: string
+export async function expireInactiveChronosGames(token?: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson('/game/expire', { method: 'POST' }, token);
+}
+
+/* ---------- Statistics ---------- */
+export async function fetchMyChronosGameStatistics(
+        token: string
 ): Promise<{ gamesPlayed: number; gamesWon: number; gamesDrawn: number }> {
-	return api('/game/stats/me', {}, token);
+        return performChronosApiRequestReturningJson('/game/stats/me', {}, token);
 }
 
-/* ---------- Catálogo ---------- */
-export type CardCatalogItem = {
-	code: string;
-	name: string;
-	description: string;
-	image?: string;
-	imageUrl?: string;
-	might: number;
-	fire: number;
-	magic: number;
-	number: number;
+/* ---------- Catalog ---------- */
+export type ChronosCardCatalogItem = {
+        code: string;
+        name: string;
+        description: string;
+        image?: string;
+        imageUrl?: string;
+        might: number;
+        fire: number;
+        magic: number;
+        number: number;
 };
-export async function listAllCards(): Promise<CardCatalogItem[]> {
-	return api<CardCatalogItem[]>('/game/cards');
+export async function fetchChronosCardCatalog(): Promise<ChronosCardCatalogItem[]> {
+        return performChronosApiRequestReturningJson('/game/cards');
 }

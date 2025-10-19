@@ -1,40 +1,45 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-	import { register as apiRegister, me } from '$lib/api/GameClient';
+        import {
+                fetchAuthenticatedChronosUserProfile,
+                registerChronosUserAccount
+        } from '$lib/api/GameClient';
 	import '../mainpage.css';
 
-	let username = '';
-	let password = '';
-	let confirm = '';
-	let err: string | null = null;
+        let usernameInputValue = '';
+        let passwordInputValue = '';
+        let confirmPasswordInputValue = '';
+        let registrationErrorMessage: string | null = null;
 
-	async function handleRegister() {
-		err = null;
-		if (!username.trim()) {
-			err = 'Username is required.';
-			return;
-		}
-		if (!password) {
-			err = 'Password is required.';
-			return;
-		}
-		if (password !== confirm) {
-			err = 'Passwords do not match.';
-			return;
-		}
+        async function handleRegister() {
+                registrationErrorMessage = null;
+                if (!usernameInputValue.trim()) {
+                        registrationErrorMessage = 'Username is required.';
+                        return;
+                }
+                if (!passwordInputValue) {
+                        registrationErrorMessage = 'Password is required.';
+                        return;
+                }
+                if (passwordInputValue !== confirmPasswordInputValue) {
+                        registrationErrorMessage = 'Passwords do not match.';
+                        return;
+                }
 
-		try {
-			const r = await apiRegister(username.trim(), password);
-			if (browser) localStorage.setItem('token', r.accessToken);
-			// sanity check & vai pra home
-			await me(r.accessToken).catch(() => {});
-			goto('/');
-		} catch (e) {
-			console.error(e);
-			err = 'Could not create account.';
-		}
-	}
+                try {
+                        const registrationResponse = await registerChronosUserAccount(
+                                usernameInputValue.trim(),
+                                passwordInputValue
+                        );
+                        if (browser) localStorage.setItem('token', registrationResponse.accessToken);
+                        await fetchAuthenticatedChronosUserProfile(registrationResponse.accessToken).catch(() => {});
+                        goto('/');
+                } catch (error) {
+                        console.error(error);
+                        registrationErrorMessage = 'Could not create account.';
+                }
+        }
 </script>
 
 <svelte:head>
@@ -50,36 +55,36 @@
 
 		<form class="controls-col auth-col" on:submit|preventDefault={handleRegister}>
 			<div class="auth-fields">
-				<label class="input-wrap">
-					<span class="input-label">Username</span>
-					<input
-						class="input-field"
-						bind:value={username}
-						placeholder="Nickname"
-						autocomplete="username"
-					/>
-				</label>
+                                <label class="input-wrap">
+                                        <span class="input-label">Username</span>
+                                        <input
+                                                class="input-field"
+                                                bind:value={usernameInputValue}
+                                                placeholder="Nickname"
+                                                autocomplete="username"
+                                        />
+                                </label>
 
 				<label class="input-wrap">
 					<span class="input-label">Password</span>
-					<input
-						class="input-field"
-						type="password"
-						bind:value={password}
-						placeholder="••••••••"
-						autocomplete="new-password"
-					/>
+                                        <input
+                                                class="input-field"
+                                                type="password"
+                                                bind:value={passwordInputValue}
+                                                placeholder="••••••••"
+                                                autocomplete="new-password"
+                                        />
 				</label>
 
 				<label class="input-wrap">
 					<span class="input-label">Confirm password</span>
-					<input
-						class="input-field"
-						type="password"
-						bind:value={confirm}
-						placeholder="••••••••"
-						autocomplete="new-password"
-					/>
+                                        <input
+                                                class="input-field"
+                                                type="password"
+                                                bind:value={confirmPasswordInputValue}
+                                                placeholder="••••••••"
+                                                autocomplete="new-password"
+                                        />
 				</label>
 			</div>
 
@@ -89,6 +94,8 @@
 			</div>
 		</form>
 
-		{#if err}<p class="empty-text" style="color:#ffbdbd">{err}</p>{/if}
+                {#if registrationErrorMessage}
+                        <p class="empty-text" style="color:#ffbdbd">{registrationErrorMessage}</p>
+                {/if}
 	</section>
 </div>
