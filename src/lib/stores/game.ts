@@ -20,9 +20,12 @@ export interface GameState {
 	gameId?: string;
 	players: string[];
 	playerUsernames?: Record<string, string>;
-	turn: number;
-	lastActivity: number;
-	winner: string | null;
+        turn: number;
+        lastActivity: number;
+        activePlayerId?: string | null;
+        turnDeadline?: number | null;
+        turnTimeLimitSeconds?: number | null;
+        winner: string | null;
 	hp: Record<string, number>;
 	hands: Record<string, string[]>;
 	decks: Record<string, string[]>;

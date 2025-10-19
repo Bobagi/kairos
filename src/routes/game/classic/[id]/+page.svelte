@@ -1,20 +1,22 @@
 <script lang="ts">
-	import { page as sveltePageStore } from '$app/stores';
+        import { browser } from '$app/environment';
+        import { page as sveltePageStore } from '$app/stores';
         import {
                 fetchChronosGameResult,
                 fetchChronosGameStateById,
                 fetchMultipleChronosCardMetadata,
                 playCardInChronosGame,
-                skipChronosGameTurn
+                skipChronosGameTurn,
+                surrenderChronosGame
         } from '$lib/api/GameClient';
-	import CardComposite from '$lib/components/CardComposite.svelte';
-	import CenterPanel from '$lib/components/CenterPanel.svelte';
-	import DeckStack from '$lib/components/DeckStack.svelte';
-	import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
-	import { fx as visualEffectsStore } from '$lib/stores/fx';
-	import { game as gameStateStore, type GameState } from '$lib/stores/game';
-	import { onMount } from 'svelte';
-	import '../../game.css';
+        import CardComposite from '$lib/components/CardComposite.svelte';
+        import CenterPanel from '$lib/components/CenterPanel.svelte';
+        import DeckStack from '$lib/components/DeckStack.svelte';
+        import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
+        import { fx as visualEffectsStore } from '$lib/stores/fx';
+        import { game as gameStateStore, type GameState } from '$lib/stores/game';
+        import { onDestroy, onMount } from 'svelte';
+        import '../../game.css';
 
 	export const DRAW_TRAVEL_MS = 420;
 	export const FLIP_MS = 700;
@@ -30,12 +32,23 @@
 		number: number;
 	};
 
-	let frameOverlayImageUrl: string | null = '/frames/default.png';
-	const titleOverlayImageUrl = '/frames/title.png';
-	const cardBackImageUrl = '/frames/card-back.png';
+        let frameOverlayImageUrl: string | null = '/frames/default.png';
+        const titleOverlayImageUrl = '/frames/title.png';
+        const cardBackImageUrl = '/frames/card-back.png';
 
-	let errorMessageText: string | null = null;
-	let finalGameResult: { winner: string | null; log: string[] } | null = null;
+        let errorMessageText: string | null = null;
+        let finalGameResult: { winner: string | null; log: string[] } | null = null;
+
+        let authToken: string | null = null;
+        let surrendering = false;
+        let surrenderError: string | null = null;
+        let nowTimestamp = Date.now();
+        let timerInterval: number | null = null;
+        let storageListener: ((event: StorageEvent) => void) | null = null;
+        let currentTurnDeadline: number | null = null;
+        let turnCountdownSeconds: number | null = null;
+        let showTurnTimer = false;
+        let turnTimerUrgent = false;
 
 	$: currentGameId = $sveltePageStore.params.id;
 	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
@@ -56,14 +69,14 @@
 	let pendingHiddenUidSet = new Set<string>();
 	let autoFlipCycleCounter = 0;
 
-	let fxLayerElement: HTMLDivElement | null = null;
-	let playerDeckAnchorElement: HTMLDivElement | null = null;
-	let opponentDeckAnchorElement: HTMLDivElement | null = null;
+        let fxLayerElement: HTMLDivElement | null = null;
+        let playerDeckAnchorElement: HTMLDivElement | null = null;
+        let opponentDeckAnchorElement: HTMLDivElement | null = null;
 
-	let hasInitialStateLoaded = false;
-	let previousOppHandCount: number | null = null;
+        let hasInitialStateLoaded = false;
+        let previousOppHandCount: number | null = null;
 
-	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
 		const buckets = new Map<string, HandCardItem[]>();
@@ -285,18 +298,51 @@
             );
 	}
 
-	async function skipTurnClassic() {
-		if (isGameOver()) return;
-		const me = $gameStateStore?.players?.[0] ?? 'playerA';
-            await skipChronosGameTurn(currentGameId, me);
-		await loadGameStateOrFinalResult();
-	}
+        async function skipTurnClassic() {
+                if (isGameOver()) return;
+                const me = $gameStateStore?.players?.[0] ?? 'playerA';
+                await skipChronosGameTurn(currentGameId, me);
+                await loadGameStateOrFinalResult();
+        }
 
-	onMount(async () => {
-		await fetchTemplate();
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
+        async function surrenderCurrentGame() {
+                if (isGameOver() || surrendering) return;
+                if (!authToken) {
+                        surrenderError = 'Login expired. Return to the main page to sign in again.';
+                        return;
+                }
+                surrenderError = null;
+                surrendering = true;
+                try {
+                        await surrenderChronosGame(currentGameId, authToken);
+                        await loadGameStateOrFinalResult();
+                } catch (error) {
+                        surrenderError = (error as Error).message ?? 'Failed to surrender.';
+                } finally {
+                        surrendering = false;
+                }
+        }
+
+        onMount(async () => {
+                if (browser) {
+                        authToken = localStorage.getItem('token');
+                        storageListener = (event: StorageEvent) => {
+                                if (event.key === 'token') authToken = event.newValue;
+                        };
+                        window.addEventListener('storage', storageListener);
+                        timerInterval = window.setInterval(() => {
+                                nowTimestamp = Date.now();
+                        }, 500);
+                }
+                await fetchTemplate();
+                await loadGameStateOrFinalResult();
+                setupMyHandResizeObserver();
+        });
+
+        onDestroy(() => {
+                if (timerInterval) window.clearInterval(timerInterval);
+                if (browser && storageListener) window.removeEventListener('storage', storageListener);
+        });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
@@ -311,11 +357,11 @@
 		? $gameStateStore!.decks[playerB].length
 		: 0;
 
-	$: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
-		? $gameStateStore!.hands[playerB].length
-		: 0;
+        $: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
+                ? $gameStateStore!.hands[playerB].length
+                : 0;
 
-	let myHandContainerElement: HTMLDivElement | null = null;
+        let myHandContainerElement: HTMLDivElement | null = null;
 	let opponentHandContainerElement: HTMLDivElement | null = null;
 	let myHandCardSpreadPixels: number | null = null;
 	function computeSpread() {
@@ -332,24 +378,53 @@
 	$: myHandEmpty = playerHandCardItems.length === 0;
 	$: myDeckEmpty = deckA === 0;
 	$: oppHandEmpty = oppHandCount === 0;
-	$: oppDeckEmpty = deckB === 0;
-	$: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
-	$: isMyTurn = ($gameStateStore?.players?.[currentTurnIndex] ?? playerA) === playerA;
-	$: showLocalSkip =
-		!isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: oppDeckEmpty = deckB === 0;
+        $: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
+        $: isMyTurn = ($gameStateStore?.players?.[currentTurnIndex] ?? playerA) === playerA;
+        $: showLocalSkip =
+                !isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: currentTurnDeadline =
+                typeof $gameStateStore?.turnDeadline === 'number' ? $gameStateStore.turnDeadline : null;
+        $: turnCountdownSeconds =
+                currentTurnDeadline !== null
+                        ? Math.max(0, Math.ceil((currentTurnDeadline - nowTimestamp) / 1000))
+                        : null;
+        $: showTurnTimer =
+                !isGameOver() && turnCountdownSeconds !== null && Number.isFinite(turnCountdownSeconds);
+        $: turnTimerUrgent = typeof turnCountdownSeconds === 'number' && turnCountdownSeconds <= 3;
 </script>
 
 <div class="fixed-top-bar">
-	<a href="/" class="home-btn">← Home</a>
-	<div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
+        <a href="/" class="home-btn">← Home</a>
+        <div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
+        {#if showTurnTimer}
+                <div class={`turn-timer-pill${turnTimerUrgent ? ' urgent' : ''}`}>
+                        ⏱️ {turnCountdownSeconds}s
+                </div>
+        {/if}
+        {#if !isGameOver()}
+                <button
+                        class="topbar-button"
+                        type="button"
+                        on:click={surrenderCurrentGame}
+                        disabled={surrendering}
+                >
+                        {surrendering ? 'Surrendering…' : '🏳️ Surrender'}
+                </button>
+        {/if}
 </div>
 
 <div class="board" style="padding-top:50px;">
-	<section class="zone opponent">
-		<div class="zone-header">
-			<span class="pill name">👤 {playerB}</span>
-			<span class="pill hp" bind:this={opponentHpPillElement}>❤️ {hpB}</span>
-			<span class="pill deck">🃏 {deckB}</span>
+        {#if surrenderError}
+                <div class="notice error" style="margin:10px auto;max-width:560px;text-align:center;">
+                        {surrenderError}
+                </div>
+        {/if}
+        <section class="zone opponent">
+                <div class="zone-header">
+                        <span class="pill name">👤 {playerB}</span>
+                        <span class="pill hp" bind:this={opponentHpPillElement}>❤️ {hpB}</span>
+                        <span class="pill deck">🃏 {deckB}</span>
 		</div>
 		<div class="zone-row two-cols">
 			<div class="deck-col" bind:this={opponentDeckAnchorElement}>

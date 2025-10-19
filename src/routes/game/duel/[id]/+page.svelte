@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { page as sveltePageStore } from '$app/stores';
+        import { browser } from '$app/environment';
+        import { page as sveltePageStore } from '$app/stores';
         import type { ChronosCardCatalogItem } from '$lib/api/GameClient';
         import {
                 advanceChronosDuel,
@@ -9,6 +10,7 @@
                 fetchChronosGameResult,
                 fetchChronosGameStateById,
                 fetchMultipleChronosCardMetadata,
+                surrenderChronosGame,
                 unchooseChronosDuelCard
         } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
@@ -35,12 +37,23 @@
 		number: number;
 	};
 
-	let frameOverlayImageUrl: string | null = '/frames/default.png';
-	const titleOverlayImageUrl = '/frames/title.png';
-	const cardBackImageUrl = '/frames/card-back.png';
+        let frameOverlayImageUrl: string | null = '/frames/default.png';
+        const titleOverlayImageUrl = '/frames/title.png';
+        const cardBackImageUrl = '/frames/card-back.png';
 
         let errorMessageText: string | null = null;
         let finalGameResult: { winner: string | null; log: string[] } | null = null;
+
+        let authToken: string | null = null;
+        let surrendering = false;
+        let surrenderError: string | null = null;
+        let nowTimestamp = Date.now();
+        let timerInterval: number | null = null;
+        let storageListener: ((event: StorageEvent) => void) | null = null;
+        let currentTurnDeadline: number | null = null;
+        let turnCountdownSeconds: number | null = null;
+        let showTurnTimer = false;
+        let turnTimerUrgent = false;
 
         $: currentGameId = $sveltePageStore.params.id;
         $: currentDuelCenter = $gameStateStore?.duelCenter ?? null;
@@ -1031,14 +1044,26 @@
                 return null;
         }
 
-	onMount(async () => {
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
+        onMount(async () => {
+                if (browser) {
+                        authToken = localStorage.getItem('token');
+                        storageListener = (event: StorageEvent) => {
+                                if (event.key === 'token') authToken = event.newValue;
+                        };
+                        window.addEventListener('storage', storageListener);
+                        timerInterval = window.setInterval(() => {
+                                nowTimestamp = Date.now();
+                        }, 500);
+                }
+                await loadGameStateOrFinalResult();
+                setupMyHandResizeObserver();
+        });
 
-	onDestroy(() => {
-		if (advanceTimer) window.clearTimeout(advanceTimer);
-	});
+        onDestroy(() => {
+                if (advanceTimer) window.clearTimeout(advanceTimer);
+                if (timerInterval) window.clearInterval(timerInterval);
+                if (browser && storageListener) window.removeEventListener('storage', storageListener);
+        });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
@@ -1056,9 +1081,21 @@
 	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
 		? $gameStateStore!.decks[playerB].length
 		: 0;
-	$: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
-		? $gameStateStore!.hands[playerB].length
-		: 0;
+        $: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
+                ? $gameStateStore!.hands[playerB].length
+                : 0;
+
+        $: currentTurnDeadline =
+                typeof $gameStateStore?.turnDeadline === 'number' ? $gameStateStore.turnDeadline : null;
+        $: turnCountdownSeconds =
+                currentTurnDeadline !== null
+                        ? Math.max(0, Math.ceil((currentTurnDeadline - nowTimestamp) / 1000))
+                        : null;
+        $: showTurnTimer =
+                !($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
+                turnCountdownSeconds !== null &&
+                Number.isFinite(turnCountdownSeconds);
+        $: turnTimerUrgent = typeof turnCountdownSeconds === 'number' && turnCountdownSeconds <= 3;
 
 	let myHandContainerElement: HTMLDivElement | null = null;
 	let myHandCardSpreadPixels: number | null = null;
@@ -1170,7 +1207,25 @@
                 }
         }
 
-	$: resolvedWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
+        async function surrenderCurrentGame() {
+                if (surrendering || ($gameStateStore?.winner ?? finalGameResult?.winner ?? null)) return;
+                if (!authToken) {
+                        surrenderError = 'Login expired. Return to the lobby to sign in again.';
+                        return;
+                }
+                surrenderError = null;
+                surrendering = true;
+                try {
+                        await surrenderChronosGame(currentGameId, authToken);
+                        await loadGameStateOrFinalResult();
+                } catch (error) {
+                        surrenderError = (error as Error).message ?? 'Failed to surrender.';
+                } finally {
+                        surrendering = false;
+                }
+        }
+
+        $: resolvedWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
 </script>
 
 <svelte:head>
@@ -1178,14 +1233,34 @@
 </svelte:head>
 
 <div class="fixed-top-bar">
-	<a href="/" class="home-btn">← Home</a>
-	<div class="mode-pill"><strong>Mode:</strong> ATTRIBUTE_DUEL</div>
+        <a href="/" class="home-btn">← Home</a>
+        <div class="mode-pill"><strong>Mode:</strong> ATTRIBUTE_DUEL</div>
+        {#if showTurnTimer}
+                <div class={`turn-timer-pill${turnTimerUrgent ? ' urgent' : ''}`}>
+                        ⏱️ {turnCountdownSeconds}s
+                </div>
+        {/if}
+        {#if !resolvedWinner}
+                <button
+                        class="topbar-button"
+                        type="button"
+                        on:click={surrenderCurrentGame}
+                        disabled={surrendering}
+                >
+                        {surrendering ? 'Surrendering…' : '🏳️ Surrender'}
+                </button>
+        {/if}
 </div>
 
 <div class="board" style="padding-top:50px;">
-	<section class="zone opponent">
-		<div class="zone-header">
-			<span class="pill name">👤 {playerBUsername}</span>
+        {#if surrenderError}
+                <div class="notice error" style="margin:10px auto;max-width:560px;text-align:center;">
+                        {surrenderError}
+                </div>
+        {/if}
+        <section class="zone opponent">
+                <div class="zone-header">
+                        <span class="pill name">👤 {playerBUsername}</span>
 			<span class="pill hp">❤️ {hpB}</span>
 			<span class="pill deck">🃏 {deckB}</span>
 		</div>

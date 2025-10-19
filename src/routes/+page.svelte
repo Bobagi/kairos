@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+        import { onMount } from 'svelte';
 
         import type { GameSummary } from '$lib/api/GameClient';
         import {
@@ -16,6 +16,7 @@
                 startAttributeDuelChronosGameForPlayer,
                 startClassicChronosGameForPlayer
         } from '$lib/api/GameClient';
+        import FriendsPanel from '$lib/components/FriendsPanel.svelte';
 	import './mainpage.css';
 
         type AuthenticatedChronosUser = { id: string; username: string; role: 'USER' | 'ADMIN' };
@@ -36,6 +37,7 @@
         let allActiveChronosGames: ChronosActiveGameSummary[] = [];
         let myActiveChronosGames: ChronosActiveGameSummary[] = [];
         $: isAdmin = authenticatedUser?.role === 'ADMIN';
+        let isFriendsPanelOpen = false;
 
 	/* ---- stats ---- */
 	let statGamesPlayed = 0;
@@ -151,6 +153,7 @@
                 statGamesPlayed = 0;
                 statGamesWon = 0;
                 statGamesDrawn = 0;
+                isFriendsPanelOpen = false;
         }
 
         async function createNewClassicChronosGame() {
@@ -214,7 +217,8 @@
                                   )
                           )
                         : '—';
-	$: statRank = 'Bronze I';
+        $: statRank = 'Bronze I';
+        $: if (!authenticatedUser) isFriendsPanelOpen = false;
 </script>
 
 <svelte:head><title>Chronos</title></svelte:head>
@@ -276,9 +280,12 @@
 							<button class="button button-neutral" on:click={() => goto('/gallery')}
 								>🖼️ Gallery</button
 							>
-							<button class="button button-accent" on:click={() => alert('Friends coming soon!')}
-								>👥 Friends</button
-							>
+                                                        <button
+                                                                class="button button-accent"
+                                                                on:click={() => (isFriendsPanelOpen = true)}
+                                                        >
+                                                                👥 Friends
+                                                        </button>
 							<button class="button button-ghost" on:click={logoutFromChronos}>Logout</button>
 						</div>
 					</div>
@@ -392,6 +399,15 @@
 		{/if}
 	</section>
 </div>
+
+{#if authenticatedUser}
+        <FriendsPanel
+                token={authenticationToken}
+                open={isFriendsPanelOpen}
+                username={authenticatedUser.username}
+                on:closed={() => (isFriendsPanelOpen = false)}
+        />
+{/if}
 
 <style>
 	.role-badge.admin {

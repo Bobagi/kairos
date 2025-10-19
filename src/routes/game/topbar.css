@@ -1,17 +1,31 @@
 .fixed-top-bar {
-	position: fixed;
-	top: 10px;
-	left: 10px;
-	z-index: 1000;
-	display: flex;
-	gap: 8px;
-	align-items: center;
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 1000;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+}
+.fixed-top-bar .topbar-button {
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.5rem;
+        background: rgba(0, 0, 0, 0.65);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(4px);
+        cursor: pointer;
+        font-weight: 600;
+}
+.fixed-top-bar .topbar-button:disabled {
+        opacity: 0.6;
+        cursor: default;
 }
 .home-btn {
-	padding: 0.45rem 0.6rem;
-	border-radius: 0.5rem;
-	background: rgba(0, 0, 0, 0.65);
-	color: #fff;
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.5rem;
+        background: rgba(0, 0, 0, 0.65);
+        color: #fff;
 	text-decoration: none;
 	border: 1px solid rgba(255, 255, 255, 0.15);
 	backdrop-filter: blur(4px);
@@ -20,8 +34,21 @@
 	padding: 0.4rem 0.6rem;
 	border-radius: 0.5rem;
 	background: rgba(0, 0, 0, 0.65);
-	color: #fff;
-	border: 1px solid rgba(255, 255, 255, 0.15);
-	backdrop-filter: blur(4px);
-	font-size: 0.85rem;
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(4px);
+        font-size: 0.85rem;
+}
+.turn-timer-pill {
+        padding: 0.4rem 0.55rem;
+        border-radius: 0.5rem;
+        background: rgba(0, 0, 0, 0.65);
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(4px);
+        font-size: 0.82rem;
+}
+.turn-timer-pill.urgent {
+        color: #ff9494;
+        border-color: rgba(255, 148, 148, 0.45);
 }

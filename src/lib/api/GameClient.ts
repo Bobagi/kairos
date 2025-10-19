@@ -53,6 +53,34 @@ export type GameMode = 'CLASSIC' | 'ATTRIBUTE_DUEL';
 export type GameSummary = { id: string; playerAId: string; mode: GameMode };
 export type GameResult = { winner: string | null; log: string[] };
 
+export type ChronosFriendStatus =
+        | 'ONLINE'
+        | 'OFFLINE'
+        | 'IN_GAME'
+        | 'BLOCKED'
+        | 'PENDING'
+        | string;
+
+export type ChronosFriendSummary = {
+        id: string;
+        username: string;
+        status?: ChronosFriendStatus;
+};
+
+export type ChronosFriendRequest = {
+        id: string;
+        from: { id: string; username: string };
+        createdAt?: string | null;
+};
+
+export type ChronosChatMessage = {
+        id: string;
+        senderId: string;
+        senderUsername?: string;
+        content: string;
+        createdAt?: string | null;
+};
+
 type ChronosRawCardMetadata = {
         number?: number | string | null;
 } | null;
@@ -250,6 +278,20 @@ export async function skipChronosGameTurn(
         );
 }
 
+export async function surrenderChronosGame(
+        gameIdentifier: string,
+        token: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/game/surrender',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ gameId: gameIdentifier })
+                },
+                token
+        );
+}
+
 /* ---------- Duel actions ---------- */
 export async function chooseChronosDuelCard(
         gameIdentifier: string,
@@ -406,4 +448,269 @@ export type ChronosCardCatalogItem = {
 };
 export async function fetchChronosCardCatalog(): Promise<ChronosCardCatalogItem[]> {
         return performChronosApiRequestReturningJson('/game/cards');
+}
+
+/* ---------- Friends & Chat ---------- */
+type ChronosRawFriendUser = {
+        id?: string;
+        username?: string;
+        status?: string;
+        state?: string;
+        online?: boolean;
+};
+
+type ChronosRawFriendRecord = ChronosRawFriendUser & {
+        friendId?: string;
+        friend?: ChronosRawFriendUser;
+        user?: ChronosRawFriendUser;
+        profile?: ChronosRawFriendUser;
+        friendUsername?: string;
+};
+
+type ChronosRawFriendRequestRecord = {
+        id?: string;
+        requestId?: string;
+        from?: ChronosRawFriendUser;
+        fromUser?: ChronosRawFriendUser;
+        sender?: ChronosRawFriendUser;
+        requester?: ChronosRawFriendUser;
+        user?: ChronosRawFriendUser;
+        createdAt?: string;
+        created_at?: string;
+};
+
+type ChronosRawChatMessageRecord = {
+        id?: string;
+        messageId?: string;
+        senderId?: string;
+        sender_id?: string;
+        sender?: ChronosRawFriendUser;
+        user?: ChronosRawFriendUser;
+        from?: ChronosRawFriendUser;
+        content?: string;
+        text?: string;
+        message?: string;
+        createdAt?: string;
+        created_at?: string;
+        sentAt?: string;
+};
+
+function normalizeFriendSummary(raw: unknown): ChronosFriendSummary | null {
+        if (!raw || typeof raw !== 'object') return null;
+        const candidate = raw as ChronosRawFriendRecord;
+        const fallbackUser = candidate.friend ?? candidate.user ?? candidate.profile ?? null;
+        const possibleIds: Array<unknown> = [
+                candidate.friendId,
+                candidate.id,
+                fallbackUser?.id,
+                candidate.user?.id
+        ];
+        let id: string | null = null;
+        for (const maybeId of possibleIds) {
+                if (typeof maybeId === 'string' && maybeId.trim()) {
+                        id = maybeId;
+                        break;
+                }
+        }
+        if (!id && typeof candidate.username === 'string' && candidate.username.trim()) {
+                id = candidate.username;
+        }
+        if (!id) return null;
+        const possibleUsernames: Array<unknown> = [
+                candidate.username,
+                candidate.friendUsername,
+                fallbackUser?.username,
+                candidate.user?.username
+        ];
+        let username: string | null = null;
+        for (const maybeUsername of possibleUsernames) {
+                if (typeof maybeUsername === 'string' && maybeUsername.trim()) {
+                        username = maybeUsername;
+                        break;
+                }
+        }
+        if (!username) username = id;
+        const statusCandidate =
+                candidate.status ??
+                fallbackUser?.status ??
+                candidate.state ??
+                (typeof candidate.online === 'boolean'
+                        ? candidate.online
+                                ? 'ONLINE'
+                                : 'OFFLINE'
+                        : undefined);
+        const status = typeof statusCandidate === 'string' ? statusCandidate : undefined;
+        return { id, username, status };
+}
+
+function normalizeFriendRequest(raw: unknown): ChronosFriendRequest | null {
+        if (!raw || typeof raw !== 'object') return null;
+        const candidate = raw as ChronosRawFriendRequestRecord;
+        const idCandidate = candidate.id ?? candidate.requestId ?? null;
+        const id = typeof idCandidate === 'string' ? idCandidate : null;
+        const fromCandidate =
+                candidate.from ??
+                candidate.fromUser ??
+                candidate.sender ??
+                candidate.requester ??
+                candidate.user ??
+                null;
+        const fromId = typeof fromCandidate?.id === 'string' ? fromCandidate.id : null;
+        const fromUsernameCandidate = fromCandidate?.username ?? fromId ?? null;
+        if (!id || !fromId) return null;
+        return {
+                id,
+                from: { id: fromId, username: typeof fromUsernameCandidate === 'string' ? fromUsernameCandidate : fromId },
+                createdAt: candidate.createdAt ?? candidate.created_at ?? null
+        };
+}
+
+function normalizeChatMessage(raw: unknown): ChronosChatMessage | null {
+        if (!raw || typeof raw !== 'object') return null;
+        const candidate = raw as ChronosRawChatMessageRecord;
+        const idCandidate = candidate.id ?? candidate.messageId ?? null;
+        const id = typeof idCandidate === 'string' ? idCandidate : null;
+        const senderIdCandidate =
+                candidate.senderId ??
+                candidate.sender_id ??
+                candidate.sender?.id ??
+                candidate.user?.id ??
+                candidate.from?.id;
+        const senderId = typeof senderIdCandidate === 'string' ? senderIdCandidate : null;
+        if (!id || !senderId) return null;
+        const contentCandidate = candidate.content ?? candidate.message ?? candidate.text ?? '';
+        const content = typeof contentCandidate === 'string' ? contentCandidate : String(contentCandidate ?? '');
+        const senderUsername =
+                candidate.sender?.username ??
+                candidate.user?.username ??
+                candidate.from?.username ??
+                undefined;
+        const createdAt = candidate.createdAt ?? candidate.created_at ?? candidate.sentAt ?? null;
+        return { id, senderId, senderUsername, content, createdAt };
+}
+
+export async function searchChronosPlayers(
+        query: string,
+        token: string
+): Promise<ChronosFriendSummary[]> {
+        if (!query.trim()) return [];
+        const rawResults = await performChronosApiRequestReturningJson<unknown[]>(
+                `/friends/search?q=${encodeURIComponent(query)}`,
+                {},
+                token
+        );
+        if (!Array.isArray(rawResults)) return [];
+        return rawResults
+                .map((entry) => normalizeFriendSummary(entry))
+                .filter((entry): entry is ChronosFriendSummary => Boolean(entry));
+}
+
+export async function listChronosFriends(token: string): Promise<ChronosFriendSummary[]> {
+        const rawResults = await performChronosApiRequestReturningJson<unknown[]>(
+                '/friends',
+                {},
+                token
+        );
+        if (!Array.isArray(rawResults)) return [];
+        return rawResults
+                .map((entry) => normalizeFriendSummary(entry))
+                .filter((entry): entry is ChronosFriendSummary => Boolean(entry));
+}
+
+export async function listChronosFriendRequests(token: string): Promise<ChronosFriendRequest[]> {
+        const rawResults = await performChronosApiRequestReturningJson<unknown[]>(
+                '/friends/requests',
+                {},
+                token
+        );
+        if (!Array.isArray(rawResults)) return [];
+        return rawResults
+                .map((entry) => normalizeFriendRequest(entry))
+                .filter((entry): entry is ChronosFriendRequest => Boolean(entry));
+}
+
+export async function sendChronosFriendRequest(targetId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/friends/request',
+                { method: 'POST', body: JSON.stringify({ targetId }) },
+                token
+        );
+}
+
+export async function acceptChronosFriendRequest(
+        requestId: string,
+        token: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/friends/request/${encodeURIComponent(requestId)}/accept`,
+                { method: 'POST' },
+                token
+        );
+}
+
+export async function rejectChronosFriendRequest(
+        requestId: string,
+        token: string
+): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/friends/request/${encodeURIComponent(requestId)}/reject`,
+                { method: 'POST' },
+                token
+        );
+}
+
+export async function removeChronosFriend(friendId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/friends/${encodeURIComponent(friendId)}`,
+                { method: 'DELETE' },
+                token
+        );
+}
+
+export async function blockChronosPlayer(targetId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/friends/block',
+                { method: 'POST', body: JSON.stringify({ targetId }) },
+                token
+        );
+}
+
+export async function fetchChronosFriendChat(
+        friendId: string,
+        token: string
+): Promise<ChronosChatMessage[]> {
+        const rawResults = await performChronosApiRequestReturningJson<unknown[]>(
+                `/friends/chat/${encodeURIComponent(friendId)}`,
+                {},
+                token
+        );
+        if (!Array.isArray(rawResults)) return [];
+        return rawResults
+                .map((entry) => normalizeChatMessage(entry))
+                .filter((entry): entry is ChronosChatMessage => Boolean(entry));
+}
+
+export async function sendChronosFriendChatMessage(
+        friendId: string,
+        content: string,
+        token: string
+): Promise<ChronosChatMessage | null> {
+        const raw = await performChronosApiRequestReturningJson<unknown>(
+                `/friends/chat/${encodeURIComponent(friendId)}`,
+                { method: 'POST', body: JSON.stringify({ content }) },
+                token
+        );
+        return normalizeChatMessage(raw);
+}
+
+export async function startChronosGameWithFriend(
+        friendId: string,
+        token: string,
+        mode: GameMode = 'CLASSIC'
+): Promise<{ gameId: string; mode: GameMode }> {
+        return performChronosApiRequestReturningJson(
+                '/game/start-with-friend',
+                { method: 'POST', body: JSON.stringify({ friendId, mode }) },
+                token
+        );
 }
