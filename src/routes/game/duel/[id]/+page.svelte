@@ -485,8 +485,33 @@
                 const overlayCtx = overlayCanvas.getContext('2d');
                 if (!overlayCtx) return;
 
+                const maskCanvas = document.createElement('canvas');
+                maskCanvas.width = canvasWidth;
+                maskCanvas.height = canvasHeight;
+                const maskCtx = maskCanvas.getContext('2d');
+                if (maskCtx) {
+                        maskCtx.fillStyle = '#ffffff';
+                        maskCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+                }
+
+                type VendorMaskStyle = CSSStyleDeclaration & {
+                        webkitMaskImage?: string;
+                        webkitMaskSize?: string;
+                        webkitMaskRepeat?: string;
+                        webkitMaskPosition?: string;
+                };
+                const styleWithVendorMasks = targetEl.style as VendorMaskStyle;
                 const originalPositionStyle = targetEl.style.position;
                 const computedPosition = getComputedStyle(targetEl).position;
+                const originalMaskImage = targetEl.style.maskImage;
+                const originalMaskSize = targetEl.style.maskSize;
+                const originalMaskRepeat = targetEl.style.maskRepeat;
+                const originalMaskPosition = targetEl.style.maskPosition;
+                const originalMaskMode = targetEl.style.maskMode;
+                const originalWebkitMaskImage = styleWithVendorMasks.webkitMaskImage;
+                const originalWebkitMaskSize = styleWithVendorMasks.webkitMaskSize;
+                const originalWebkitMaskRepeat = styleWithVendorMasks.webkitMaskRepeat;
+                const originalWebkitMaskPosition = styleWithVendorMasks.webkitMaskPosition;
                 if (!computedPosition || computedPosition === 'static') {
                         targetEl.style.position = 'relative';
                 }
@@ -495,8 +520,85 @@
                 targetEl.classList.add('defeat-active', `defeat-${mode}`);
                 targetEl.appendChild(overlayCanvas);
 
+                let maskPendingUpload = false;
+                let lastMaskUploadTimestamp = performance.now();
+                const maskUploadIntervalMs = 60;
+                const applyMaskTexture = (stamp?: number) => {
+                        if (!maskCtx) return;
+                        const maskDataUrl = maskCanvas.toDataURL('image/png');
+                        targetEl.style.maskImage = `url(${maskDataUrl})`;
+                        targetEl.style.maskSize = '100% 100%';
+                        targetEl.style.maskRepeat = 'no-repeat';
+                        targetEl.style.maskPosition = '0 0';
+                        targetEl.style.maskMode = 'alpha';
+                        styleWithVendorMasks.webkitMaskImage = `url(${maskDataUrl})`;
+                        styleWithVendorMasks.webkitMaskSize = '100% 100%';
+                        styleWithVendorMasks.webkitMaskRepeat = 'no-repeat';
+                        styleWithVendorMasks.webkitMaskPosition = '0 0';
+                        maskPendingUpload = false;
+                        lastMaskUploadTimestamp = stamp ?? performance.now();
+                };
+                if (maskCtx) {
+                        applyMaskTexture();
+                }
+
                 const particleCount = Math.min(260, Math.max(110, Math.round((canvasWidth * canvasHeight) / 950)));
                 const particles: DefeatParticle[] = [];
+
+                const carveCircleIntoMask = (
+                        px: number,
+                        py: number,
+                        radiusPx: number,
+                        strength: number
+                ) => {
+                        if (!maskCtx) return;
+                        const effectiveStrength = Math.max(0.05, Math.min(1, strength));
+                        maskCtx.save();
+                        maskCtx.globalCompositeOperation = 'destination-out';
+                        const gradient = maskCtx.createRadialGradient(
+                                px,
+                                py,
+                                radiusPx * 0.25,
+                                px,
+                                py,
+                                radiusPx
+                        );
+                        gradient.addColorStop(0, `rgba(0, 0, 0, ${effectiveStrength})`);
+                        gradient.addColorStop(0.55, `rgba(0, 0, 0, ${effectiveStrength * 0.6})`);
+                        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                        maskCtx.fillStyle = gradient;
+                        maskCtx.beginPath();
+                        maskCtx.arc(px, py, radiusPx, 0, Math.PI * 2);
+                        maskCtx.fill();
+                        maskCtx.restore();
+                        maskPendingUpload = true;
+                };
+
+                const carveImpactIntoMask = (
+                        px: number,
+                        py: number,
+                        widthPx: number,
+                        heightPx: number,
+                        rotation: number,
+                        strength: number
+                ) => {
+                        if (!maskCtx) return;
+                        const impactStrength = Math.max(0.05, Math.min(1, strength));
+                        maskCtx.save();
+                        maskCtx.translate(px, py);
+                        maskCtx.rotate(rotation);
+                        maskCtx.globalCompositeOperation = 'destination-out';
+                        maskCtx.fillStyle = `rgba(0, 0, 0, ${impactStrength})`;
+                        maskCtx.beginPath();
+                        maskCtx.moveTo(-widthPx * 0.5, heightPx * 0.5);
+                        maskCtx.lineTo(-widthPx * 0.2, -heightPx * 0.4);
+                        maskCtx.lineTo(widthPx * 0.15, -heightPx * 0.2);
+                        maskCtx.lineTo(widthPx * 0.5, heightPx * 0.5);
+                        maskCtx.closePath();
+                        maskCtx.fill();
+                        maskCtx.restore();
+                        maskPendingUpload = true;
+                };
 
                 const spawnFireParticle = (): FireDefeatParticle => ({
                         type: 'fire',
@@ -596,6 +698,22 @@
                         overlayCtx.globalCompositeOperation = 'source-over';
                         overlayCtx.clearRect(0, 0, canvasWidth, canvasHeight);
                         overlayCtx.globalCompositeOperation = mode === 'might' ? 'screen' : 'lighter';
+                        if (maskCtx) {
+                                const erosionStrength = Math.min(0.18, normalized * 0.14);
+                                if (erosionStrength > 0.01) {
+                                        maskCtx.save();
+                                        maskCtx.globalCompositeOperation = 'destination-out';
+                                        maskCtx.fillStyle = `rgba(0, 0, 0, ${erosionStrength})`;
+                                        maskCtx.fillRect(
+                                                canvasWidth * 0.08,
+                                                canvasHeight * (0.65 + normalized * 0.25),
+                                                canvasWidth * 0.84,
+                                                canvasHeight * 0.45
+                                        );
+                                        maskCtx.restore();
+                                        maskPendingUpload = true;
+                                }
+                        }
 
                         if (mode === 'might') {
                                 const smashFlashStrength = Math.max(0, 1 - normalized * 1.05);
@@ -659,6 +777,12 @@
                                         overlayCtx.beginPath();
                                         overlayCtx.arc(px, py, sizePx, 0, Math.PI * 2);
                                         overlayCtx.fill();
+                                        carveCircleIntoMask(
+                                                px,
+                                                py,
+                                                sizePx * (1.6 + normalized * 0.8),
+                                                0.6 + normalized * 0.45
+                                        );
                                         continue;
                                 }
 
@@ -686,6 +810,12 @@
                                         overlayCtx.beginPath();
                                         overlayCtx.arc(px, py, sizePx, 0, Math.PI * 2);
                                         overlayCtx.fill();
+                                        carveCircleIntoMask(
+                                                px,
+                                                py,
+                                                sizePx * (1.8 + normalized * 1.1),
+                                                0.5 + normalized * 0.5
+                                        );
                                         continue;
                                 }
 
@@ -730,6 +860,22 @@
                                 overlayCtx.lineWidth = Math.max(0.8, widthPx * 0.06);
                                 overlayCtx.stroke();
                                 overlayCtx.restore();
+                                carveImpactIntoMask(
+                                        px,
+                                        py,
+                                        widthPx * (1.2 + normalized * 0.8),
+                                        heightPx * (1.1 + normalized * 0.6),
+                                        particle.rotation,
+                                        0.65 + normalized * 0.5
+                                );
+                        }
+
+                        if (
+                                maskCtx &&
+                                maskPendingUpload &&
+                                (timestamp - lastMaskUploadTimestamp >= maskUploadIntervalMs || normalized >= 1)
+                        ) {
+                                applyMaskTexture(timestamp);
                         }
 
                         if (normalized < 1) {
@@ -752,6 +898,17 @@
                         targetEl.style.pointerEvents = 'none';
                         targetEl.classList.remove('defeat-active', `defeat-${mode}`);
                         delete targetEl.dataset.defeatEffectActive;
+                        if (maskCtx) {
+                                targetEl.style.maskImage = originalMaskImage;
+                                targetEl.style.maskSize = originalMaskSize;
+                                targetEl.style.maskRepeat = originalMaskRepeat;
+                                targetEl.style.maskPosition = originalMaskPosition;
+                                targetEl.style.maskMode = originalMaskMode;
+                                styleWithVendorMasks.webkitMaskImage = originalWebkitMaskImage ?? '';
+                                styleWithVendorMasks.webkitMaskSize = originalWebkitMaskSize ?? '';
+                                styleWithVendorMasks.webkitMaskRepeat = originalWebkitMaskRepeat ?? '';
+                                styleWithVendorMasks.webkitMaskPosition = originalWebkitMaskPosition ?? '';
+                        }
                         overlayCanvas.remove();
                         fadeAnimation.removeEventListener('finish', cleanup);
                         if (!originalPositionStyle && computedPosition === 'static') {
