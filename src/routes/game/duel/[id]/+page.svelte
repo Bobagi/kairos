@@ -76,12 +76,49 @@
 	let centerSlotBElement: HTMLDivElement | null = null;
 	let lastDissolveCycleId: number | null = null;
 
-	let hasInitialStateLoaded = false;
-	let previousOppHandCount: number | null = null;
+        let hasInitialStateLoaded = false;
+        let previousOppHandCount: number | null = null;
 
-	let historyScrollContainerElement: HTMLDivElement | null = null;
-	let lastReturnedCode: string | null = null;
-	let lastAppliedLogLength = -1;
+        let playerA: string = 'playerA';
+        let playerB: string = 'playerB';
+        let playerAUsername: string = 'playerA';
+        let playerBUsername: string = 'playerB';
+
+        let historyScrollContainerElement: HTMLDivElement | null = null;
+        let lastReturnedCode: string | null = null;
+        let lastAppliedLogLength = -1;
+
+        type LogCategory = 'player' | 'opponent' | 'neutral';
+
+        function getLogPresentation(line: string): {
+                category: LogCategory;
+                icon: string;
+                text: string;
+        } {
+                const safeLine = line ?? '';
+                const normalizedLine = safeLine.toLowerCase();
+                const normalizedPlayer = (playerAUsername ?? '').toLowerCase();
+                const normalizedOpponent = (playerBUsername ?? '').toLowerCase();
+
+                if (normalizedPlayer && normalizedLine.includes(normalizedPlayer)) {
+                        return { category: 'player', icon: '🛡️', text: safeLine };
+                }
+                if (normalizedOpponent && normalizedLine.includes(normalizedOpponent)) {
+                        return { category: 'opponent', icon: '⚔️', text: safeLine };
+                }
+                return { category: 'neutral', icon: '✨', text: safeLine };
+        }
+
+        function isHighlightedAttribute(attr: 'magic' | 'might' | 'fire'): boolean {
+                if (!chooserCardDetails) return false;
+                const stats = {
+                        magic: chooserCardDetails.magic ?? 0,
+                        might: chooserCardDetails.might ?? 0,
+                        fire: chooserCardDetails.fire ?? 0
+                };
+                const highest = Math.max(stats.magic, stats.might, stats.fire);
+                return stats[attr] === highest && highest > 0;
+        }
 
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -107,9 +144,10 @@
 		return { items, created };
 	}
 
-	let cardDetailsCacheByCode = new Map<string, CardDetails>();
-	let catalogNumberByCode = new Map<string, number>();
-	let catalogLoaded = false;
+        let cardDetailsCacheByCode = new Map<string, CardDetails>();
+        let catalogNumberByCode = new Map<string, number>();
+        let catalogLoaded = false;
+        let chooserCardDetails: CardDetails | null = null;
 
         async function ensureCatalogLoaded() {
                 if (catalogLoaded) return;
@@ -606,22 +644,34 @@
 	}
 	$: computeSpread();
 
-	$: canReturnSelectedCardToHand =
-		!($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
-		$gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
-		Boolean(currentDuelCenter?.aCardCode) &&
-		currentDuelStage !== 'REVEAL' &&
-		($gameStateStore?.players?.[0] ?? '') === chooserId;
+        $: canReturnSelectedCardToHand =
+                !($gameStateStore?.winner ?? finalGameResult?.winner ?? null) &&
+                $gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
+                Boolean(currentDuelCenter?.aCardCode) &&
+                currentDuelStage !== 'REVEAL' &&
+                ($gameStateStore?.players?.[0] ?? '') === chooserId;
 
-	$: historyLogLength = $gameStateStore?.log?.length ?? 0;
-	$: if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
-		lastAppliedLogLength = historyLogLength;
-		requestAnimationFrame(() => {
-			if (historyScrollContainerElement) {
-				historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
-			}
-		});
-	}
+        $: chooserCardDetails =
+                duelStage === 'PICK_ATTRIBUTE' &&
+                chooserId === playerA &&
+                currentDuelCenter?.aCardCode
+                        ? cardDetailsCacheByCode.get(currentDuelCenter.aCardCode) ?? null
+                        : null;
+
+        $: historyLogLength = $gameStateStore?.log?.length ?? 0;
+        $: {
+                if (historyLogLength < lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                }
+                if (historyScrollContainerElement && historyLogLength > lastAppliedLogLength) {
+                        lastAppliedLogLength = historyLogLength;
+                        requestAnimationFrame(() => {
+                                if (historyScrollContainerElement) {
+                                        historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
+                                }
+                        });
+                }
+        }
 
 	$: {
 		if (
@@ -809,15 +859,45 @@
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						<span>Choose attribute:</span>
 						<div>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('magic')}>
-								<img src="/icons/magic_icon.png" alt="Magic icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('might')}>
-								<img src="/icons/strength_icon.png" alt="Might icon" />
-							</button>
-							<button class="btn" disabled={isGameOver()} on:click={() => chooseAttr('fire')}>
-								<img src="/icons/fire_icon.png" alt="Fire icon" />
-							</button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('magic')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('magic')}
+                                                                title={`Choose magic (${chooserCardDetails?.magic ?? '–'})`}
+                                                                aria-label={`Choose magic (${chooserCardDetails?.magic ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/magic_icon.png" alt="Magic icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.magic}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('might')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('might')}
+                                                                title={`Choose might (${chooserCardDetails?.might ?? '–'})`}
+                                                                aria-label={`Choose might (${chooserCardDetails?.might ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/strength_icon.png" alt="Might icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.might}</span>
+                                                                {/if}
+                                                        </button>
+                                                        <button
+                                                                class="btn attribute-option"
+                                                                class:attribute-highlight={isHighlightedAttribute('fire')}
+                                                                disabled={isGameOver()}
+                                                                on:click={() => chooseAttr('fire')}
+                                                                title={`Choose fire (${chooserCardDetails?.fire ?? '–'})`}
+                                                                aria-label={`Choose fire (${chooserCardDetails?.fire ?? 'unknown'})`}
+                                                        >
+                                                                <img src="/icons/fire_icon.png" alt="Fire icon" />
+                                                                {#if chooserCardDetails}
+                                                                        <span class="attribute-value">{chooserCardDetails.fire}</span>
+                                                                {/if}
+                                                        </button>
 						</div>
 					</div>
 				{:else if duelStage === 'PICK_ATTRIBUTE'}
@@ -842,20 +922,22 @@
 					{/if}
 				</div>
 
-				{#if $gameStateStore?.log?.length}
-					<div class="history">
-						<div class="title">History</div>
-						<div
-							class="scroll"
-							style="flex-direction: column;"
-							bind:this={historyScrollContainerElement}
-						>
-							{#each $gameStateStore.log as line}
-								<div>{line}</div>
-							{/each}
-						</div>
-					</div>
-				{/if}
+                                {#if $gameStateStore?.log?.length}
+                                        <div class="history">
+                                                <div class="title">History</div>
+                                                <div class="scroll" bind:this={historyScrollContainerElement}>
+                                                        {#each $gameStateStore.log as line, index (index)}
+                                                                {@const presentation = getLogPresentation(line)}
+                                                                <div class={`log-entry ${presentation.category}`}>
+                                                                        <span class="log-marker" aria-hidden="true">
+                                                                                {presentation.icon}
+                                                                        </span>
+                                                                        <span class="log-text">{presentation.text}</span>
+                                                                </div>
+                                                        {/each}
+                                                </div>
+                                        </div>
+                                {/if}
 			</div>
 		</div>
 	</section>
