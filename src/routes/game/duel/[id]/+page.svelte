@@ -87,6 +87,11 @@
         let historyScrollContainerElement: HTMLDivElement | null = null;
         let lastReturnedCode: string | null = null;
         let lastAppliedLogLength = -1;
+        let provisionalRevealHistoryEntries: string[] = [];
+        let lastProvisionalRevealCycleId: number | null = null;
+        let lastAcknowledgedOfficialLogLength = 0;
+        let officialHistoryLogEntries: string[] = [];
+        let combinedHistoryLogEntries: string[] = [];
 
         type LogCategory = 'player' | 'opponent' | 'neutral';
 
@@ -107,6 +112,74 @@
                         return { category: 'opponent', icon: '⚔️', text: safeLine };
                 }
                 return { category: 'neutral', icon: '✨', text: safeLine };
+        }
+
+        function formatCardNameForHistory(cardCode: string | undefined | null): string | null {
+                if (!cardCode) return null;
+                const details = cardDetailsCacheByCode.get(cardCode);
+                if (details?.name) return details.name;
+                return cardCode;
+        }
+
+        function formatAttributeLabel(attribute: 'fire' | 'magic' | 'might'): { label: string; icon: string } {
+                if (attribute === 'fire') {
+                        return { label: 'Fire', icon: '🔥' };
+                }
+                if (attribute === 'magic') {
+                        return { label: 'Magic', icon: '🪄' };
+                }
+                return { label: 'Might', icon: '💪' };
+        }
+
+        function buildProvisionalHistoryLineForReveal(
+                center: NonNullable<GameState['duelCenter']>,
+                roundWinner: string | null
+        ): string | null {
+                const attributeMode = detectChosenAttributeMode(center);
+                const { label: attributeLabel, icon: attributeIcon } = formatAttributeLabel(attributeMode);
+                const playerACardCode = center.aCardCode ?? null;
+                const playerBCardCode = center.bCardCode ?? null;
+                const playerACard = playerACardCode ? cardDetailsCacheByCode.get(playerACardCode) ?? null : null;
+                const playerBCard = playerBCardCode ? cardDetailsCacheByCode.get(playerBCardCode) ?? null : null;
+                const playerACardName = formatCardNameForHistory(playerACardCode);
+                const playerBCardName = formatCardNameForHistory(playerBCardCode);
+                const playerAStat = playerACard ? playerACard[attributeMode] ?? null : null;
+                const playerBStat = playerBCard ? playerBCard[attributeMode] ?? null : null;
+
+                if (!roundWinner || roundWinner === 'DRAW') {
+                        const statText =
+                                typeof playerAStat === 'number' && typeof playerBStat === 'number'
+                                        ? ` (${playerAStat} vs ${playerBStat})`
+                                        : '';
+                        const cardNamesText =
+                                playerACardName && playerBCardName
+                                        ? ` between ${playerACardName} and ${playerBCardName}`
+                                        : '';
+                        return `${attributeIcon} ${attributeLabel} tie: ${playerAUsername} and ${playerBUsername}${cardNamesText}${statText}.`;
+                }
+
+                const isPlayerAWinner = roundWinner === playerA;
+                const winnerName = isPlayerAWinner ? playerAUsername : roundWinner === playerB ? playerBUsername : roundWinner;
+                const loserName = isPlayerAWinner ? playerBUsername : playerAUsername;
+                const winnerCardCode = isPlayerAWinner ? playerACardCode : playerBCardCode;
+                const loserCardCode = isPlayerAWinner ? playerBCardCode : playerACardCode;
+                const winnerCard = winnerCardCode ? cardDetailsCacheByCode.get(winnerCardCode) ?? null : null;
+                const loserCard = loserCardCode ? cardDetailsCacheByCode.get(loserCardCode) ?? null : null;
+                const winnerStat = winnerCard ? winnerCard[attributeMode] ?? null : null;
+                const loserStat = loserCard ? loserCard[attributeMode] ?? null : null;
+                const statSummary =
+                        typeof winnerStat === 'number' && typeof loserStat === 'number'
+                                ? ` (${winnerStat} vs ${loserStat})`
+                                : '';
+                const winnerCardName = isPlayerAWinner ? playerACardName : playerBCardName;
+                const loserCardName = isPlayerAWinner ? playerBCardName : playerACardName;
+                const cardSummary =
+                        winnerCardName && loserCardName
+                                ? ` with ${winnerCardName} against ${loserCardName}`
+                                : winnerCardName
+                                ? ` with ${winnerCardName}`
+                                : '';
+                return `${attributeIcon} ${attributeLabel} victory: ${winnerName} defeats ${loserName}${cardSummary}${statSummary}.`;
         }
 
         function isHighlightedAttribute(attr: 'magic' | 'might' | 'fire'): boolean {
@@ -1003,7 +1076,51 @@
                         ? cardDetailsCacheByCode.get(currentDuelCenter.aCardCode) ?? null
                         : null;
 
-        $: historyLogLength = $gameStateStore?.log?.length ?? 0;
+        $: officialHistoryLogEntries = $gameStateStore?.log ?? [];
+        $: {
+                const officialLength = officialHistoryLogEntries.length;
+                if (officialLength !== lastAcknowledgedOfficialLogLength) {
+                        lastAcknowledgedOfficialLogLength = officialLength;
+                        if (provisionalRevealHistoryEntries.length) {
+                                provisionalRevealHistoryEntries = [];
+                        }
+                        if (duelStage === 'REVEAL' && typeof centerRevealCycle === 'number') {
+                                lastProvisionalRevealCycleId = centerRevealCycle;
+                        } else if (duelStage !== 'REVEAL') {
+                                lastProvisionalRevealCycleId = null;
+                        }
+                }
+        }
+
+        $: {
+                if (
+                        duelStage === 'REVEAL' &&
+                        typeof centerRevealCycle === 'number' &&
+                        centerRevealCycle > 0 &&
+                        centerRevealCycle !== lastProvisionalRevealCycleId &&
+                        currentDuelCenter &&
+                        provisionalRevealHistoryEntries.length === 0
+                ) {
+                        const provisionalLine = buildProvisionalHistoryLineForReveal(
+                                currentDuelCenter,
+                                currentDuelRoundWinner
+                        );
+                        if (provisionalLine) {
+                                provisionalRevealHistoryEntries = [provisionalLine];
+                                lastProvisionalRevealCycleId = centerRevealCycle;
+                        }
+                } else if (duelStage !== 'REVEAL' && provisionalRevealHistoryEntries.length) {
+                        provisionalRevealHistoryEntries = [];
+                        lastProvisionalRevealCycleId = null;
+                }
+        }
+
+        $: combinedHistoryLogEntries = [
+                ...officialHistoryLogEntries,
+                ...provisionalRevealHistoryEntries
+        ];
+
+        $: historyLogLength = combinedHistoryLogEntries.length;
         $: {
                 if (historyLogLength < lastAppliedLogLength) {
                         lastAppliedLogLength = historyLogLength;
@@ -1012,7 +1129,8 @@
                         lastAppliedLogLength = historyLogLength;
                         requestAnimationFrame(() => {
                                 if (historyScrollContainerElement) {
-                                        historyScrollContainerElement.scrollTop = historyScrollContainerElement.scrollHeight;
+                                        historyScrollContainerElement.scrollTop =
+                                                historyScrollContainerElement.scrollHeight;
                                 }
                         });
                 }
@@ -1271,11 +1389,11 @@
 					{/if}
 				</div>
 
-                                {#if $gameStateStore?.log?.length}
+                                {#if combinedHistoryLogEntries.length}
                                         <div class="history">
                                                 <div class="title">History</div>
                                                 <div class="scroll" bind:this={historyScrollContainerElement}>
-                                                        {#each $gameStateStore.log as line, index (index)}
+                                                        {#each combinedHistoryLogEntries as line, index (index)}
                                                                 {@const presentation = getLogPresentation(line)}
                                                                 <div class={`log-entry ${presentation.category}`}>
                                                                         <span class="log-marker" aria-hidden="true">
