@@ -105,6 +105,17 @@
                 const normalizedPlayer = (playerAUsername ?? '').toLowerCase();
                 const normalizedOpponent = (playerBUsername ?? '').toLowerCase();
 
+                const victoryMatch = safeLine.match(/victory:\s*([^]+?) defeats/i);
+                if (victoryMatch && victoryMatch[1]) {
+                        const winnerText = victoryMatch[1].toLowerCase();
+                        if (normalizedPlayer && winnerText.includes(normalizedPlayer)) {
+                                return { category: 'player', icon: '🛡️', text: safeLine };
+                        }
+                        if (normalizedOpponent && winnerText.includes(normalizedOpponent)) {
+                                return { category: 'opponent', icon: '⚔️', text: safeLine };
+                        }
+                }
+
                 if (normalizedPlayer && normalizedLine.includes(normalizedPlayer)) {
                         return { category: 'player', icon: '🛡️', text: safeLine };
                 }
