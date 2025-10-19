@@ -452,6 +452,10 @@
                 maxLife: number;
                 width: number;
                 height: number;
+                notchOffsetLeft: number;
+                notchOffsetRight: number;
+                fractureDepth: number;
+                baseAlpha: number;
         };
 
         type DefeatParticle = FireDefeatParticle | MagicDefeatParticle | MightDefeatParticle;
@@ -491,19 +495,19 @@
                 targetEl.classList.add('defeat-active', `defeat-${mode}`);
                 targetEl.appendChild(overlayCanvas);
 
-                const particleCount = Math.min(220, Math.max(90, Math.round((canvasWidth * canvasHeight) / 1100)));
+                const particleCount = Math.min(260, Math.max(110, Math.round((canvasWidth * canvasHeight) / 950)));
                 const particles: DefeatParticle[] = [];
 
                 const spawnFireParticle = (): FireDefeatParticle => ({
                         type: 'fire',
                         px: Math.random(),
                         py: 0.55 + Math.random() * 0.4,
-                        vx: (Math.random() - 0.5) * 0.18,
-                        vy: -0.45 - Math.random() * 0.35,
+                        vx: (Math.random() - 0.5) * 0.24,
+                        vy: -0.55 - Math.random() * 0.42,
                         life: 0,
-                        maxLife: 0.7 + Math.random() * 0.9,
-                        size: 0.05 + Math.random() * 0.09,
-                        flickerSpeed: 6 + Math.random() * 6
+                        maxLife: 0.85 + Math.random() * 1.1,
+                        size: 0.07 + Math.random() * 0.11,
+                        flickerSpeed: 6 + Math.random() * 7
                 });
 
                 const spawnMagicParticle = (): MagicDefeatParticle => {
@@ -513,28 +517,36 @@
                                 angle: Math.random() * Math.PI * 2,
                                 radius: baseRadius,
                                 angularVelocity: (Math.random() * 1.6 + 0.7) * (Math.random() > 0.5 ? 1 : -1),
-                                radiusVelocity: 0.18 + Math.random() * 0.25,
+                                radiusVelocity: 0.22 + Math.random() * 0.28,
                                 px: 0.5,
                                 py: 0.5,
                                 life: 0,
-                                maxLife: 1.2 + Math.random() * 1.1,
-                                size: 0.05 + Math.random() * 0.08
+                                maxLife: 1.25 + Math.random() * 1.2,
+                                size: 0.06 + Math.random() * 0.09
                         };
                 };
 
-                const spawnMightParticle = (): MightDefeatParticle => ({
-                        type: 'might',
-                        px: 0.25 + Math.random() * 0.5,
-                        py: 0.2 + Math.random() * 0.4,
-                        vx: (Math.random() - 0.5) * 0.75,
-                        vy: 0.55 + Math.random() * 0.65,
-                        rotation: (Math.random() - 0.5) * 0.6,
-                        rotationVelocity: (Math.random() - 0.5) * 5,
-                        life: 0,
-                        maxLife: 0.9 + Math.random() * 1.1,
-                        width: 0.05 + Math.random() * 0.12,
-                        height: 0.12 + Math.random() * 0.22
-                });
+                const spawnMightParticle = (): MightDefeatParticle => {
+                        const width = 0.05 + Math.random() * 0.09;
+                        const height = 0.16 + Math.random() * 0.26;
+                        return {
+                                type: 'might',
+                                px: 0.25 + Math.random() * 0.5,
+                                py: 0.18 + Math.random() * 0.45,
+                                vx: (Math.random() - 0.5) * 0.68,
+                                vy: 0.6 + Math.random() * 0.7,
+                                rotation: (Math.random() - 0.5) * 0.8,
+                                rotationVelocity: (Math.random() - 0.5) * 6,
+                                life: 0,
+                                maxLife: 1 + Math.random() * 1.2,
+                                width,
+                                height,
+                                notchOffsetLeft: (Math.random() - 0.5) * 0.6,
+                                notchOffsetRight: (Math.random() - 0.5) * 0.6,
+                                fractureDepth: 0.35 + Math.random() * 0.45,
+                                baseAlpha: 0.75 + Math.random() * 0.25
+                        };
+                };
 
                 const buildParticle = (): DefeatParticle => {
                         if (mode === 'fire') return spawnFireParticle();
@@ -583,7 +595,39 @@
 
                         overlayCtx.globalCompositeOperation = 'source-over';
                         overlayCtx.clearRect(0, 0, canvasWidth, canvasHeight);
-                        overlayCtx.globalCompositeOperation = mode === 'might' ? 'source-over' : 'lighter';
+                        overlayCtx.globalCompositeOperation = mode === 'might' ? 'screen' : 'lighter';
+
+                        if (mode === 'might') {
+                                const smashFlashStrength = Math.max(0, 1 - normalized * 1.05);
+                                if (smashFlashStrength > 0.01) {
+                                        overlayCtx.save();
+                                        overlayCtx.globalAlpha = smashFlashStrength * 0.55;
+                                        overlayCtx.fillStyle = 'rgba(255, 242, 210, 1)';
+                                        overlayCtx.beginPath();
+                                        overlayCtx.ellipse(
+                                                canvasWidth * 0.5,
+                                                canvasHeight * 0.58,
+                                                canvasWidth * (0.26 + smashFlashStrength * 0.28),
+                                                canvasHeight * (0.2 + smashFlashStrength * 0.18),
+                                                0,
+                                                0,
+                                                Math.PI * 2
+                                        );
+                                        overlayCtx.fill();
+                                        overlayCtx.globalAlpha = smashFlashStrength * 0.45;
+                                        overlayCtx.lineWidth = Math.max(2, canvasWidth * 0.012);
+                                        overlayCtx.strokeStyle = 'rgba(255, 210, 130, 1)';
+                                        overlayCtx.beginPath();
+                                        overlayCtx.moveTo(canvasWidth * 0.5, canvasHeight * 0.18);
+                                        overlayCtx.lineTo(canvasWidth * 0.5, canvasHeight * 0.88);
+                                        overlayCtx.moveTo(canvasWidth * 0.32, canvasHeight * 0.32);
+                                        overlayCtx.lineTo(canvasWidth * 0.68, canvasHeight * 0.78);
+                                        overlayCtx.moveTo(canvasWidth * 0.68, canvasHeight * 0.32);
+                                        overlayCtx.lineTo(canvasWidth * 0.32, canvasHeight * 0.78);
+                                        overlayCtx.stroke();
+                                        overlayCtx.restore();
+                                }
+                        }
 
                         const centerX = 0.5;
                         const centerY = 0.5;
@@ -604,14 +648,17 @@
                                         const px = particle.px * canvasWidth;
                                         const py = particle.py * canvasHeight;
                                         const sizePx = particle.size * canvasWidth;
-                                        const flicker = 0.6 + Math.sin(timestamp / 1000 * particle.flickerSpeed) * 0.3;
-                                        const alpha = Math.min(1, remaining * 1.1) * 0.9 * flicker;
-                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.2, px, py, sizePx);
-                                        gradient.addColorStop(0, `rgba(255, 230, 160, ${alpha})`);
-                                        gradient.addColorStop(0.45, `rgba(255, 120, 40, ${alpha * 0.85})`);
-                                        gradient.addColorStop(1, 'rgba(70, 18, 0, 0)');
+                                        const flicker = 0.7 + Math.sin((timestamp / 1000) * particle.flickerSpeed) * 0.35;
+                                        const alpha = Math.min(1.2, remaining * 1.35) * 1.05 * flicker;
+                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.12, px, py, sizePx);
+                                        gradient.addColorStop(0, `rgba(255, 250, 200, ${Math.min(1, alpha * 1.1)})`);
+                                        gradient.addColorStop(0.35, `rgba(255, 170, 60, ${alpha})`);
+                                        gradient.addColorStop(0.7, `rgba(255, 80, 30, ${alpha * 0.8})`);
+                                        gradient.addColorStop(1, 'rgba(60, 10, 0, 0)');
                                         overlayCtx.fillStyle = gradient;
-                                        overlayCtx.fillRect(px - sizePx, py - sizePx, sizePx * 2, sizePx * 2);
+                                        overlayCtx.beginPath();
+                                        overlayCtx.arc(px, py, sizePx, 0, Math.PI * 2);
+                                        overlayCtx.fill();
                                         continue;
                                 }
 
@@ -629,13 +676,16 @@
                                         const px = particle.px * canvasWidth;
                                         const py = particle.py * canvasHeight;
                                         const sizePx = particle.size * canvasWidth;
-                                        const alpha = Math.min(1, remaining * 1.15);
-                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.2, px, py, sizePx);
-                                        gradient.addColorStop(0, `rgba(210, 240, 255, ${alpha})`);
-                                        gradient.addColorStop(0.5, `rgba(120, 150, 255, ${alpha * 0.7})`);
-                                        gradient.addColorStop(1, 'rgba(30, 0, 80, 0)');
+                                        const alpha = Math.min(1.15, remaining * 1.35);
+                                        const gradient = overlayCtx.createRadialGradient(px, py, sizePx * 0.16, px, py, sizePx);
+                                        gradient.addColorStop(0, `rgba(230, 245, 255, ${Math.min(1, alpha * 1.1)})`);
+                                        gradient.addColorStop(0.45, `rgba(150, 190, 255, ${alpha})`);
+                                        gradient.addColorStop(0.82, `rgba(70, 110, 255, ${alpha * 0.65})`);
+                                        gradient.addColorStop(1, 'rgba(15, 0, 80, 0)');
                                         overlayCtx.fillStyle = gradient;
-                                        overlayCtx.fillRect(px - sizePx, py - sizePx, sizePx * 2, sizePx * 2);
+                                        overlayCtx.beginPath();
+                                        overlayCtx.arc(px, py, sizePx, 0, Math.PI * 2);
+                                        overlayCtx.fill();
                                         continue;
                                 }
 
@@ -654,14 +704,31 @@
                                 const py = particle.py * canvasHeight;
                                 const widthPx = particle.width * canvasWidth;
                                 const heightPx = particle.height * canvasHeight;
-                                const alpha = Math.min(1, remaining * 1.05);
+                                const alpha = Math.min(1, remaining * 1.15) * particle.baseAlpha;
                                 overlayCtx.save();
                                 overlayCtx.translate(px, py);
                                 overlayCtx.rotate(particle.rotation);
-                                overlayCtx.fillStyle = `rgba(200, 160, 110, ${alpha})`;
-                                overlayCtx.fillRect(-widthPx * 0.5, -heightPx * 0.5, widthPx, heightPx);
-                                overlayCtx.fillStyle = `rgba(120, 70, 30, ${alpha * 0.8})`;
-                                overlayCtx.fillRect(-widthPx * 0.5, -heightPx * 0.15, widthPx, heightPx * 0.3);
+                                overlayCtx.beginPath();
+                                overlayCtx.moveTo(-widthPx * 0.5, heightPx * 0.5);
+                                overlayCtx.lineTo(-widthPx * (0.25 + particle.notchOffsetLeft * 0.25), -heightPx * particle.fractureDepth);
+                                overlayCtx.lineTo(widthPx * (0.2 + particle.notchOffsetRight * 0.25), -heightPx * 0.25);
+                                overlayCtx.lineTo(widthPx * 0.5, heightPx * 0.5);
+                                overlayCtx.closePath();
+                                overlayCtx.fillStyle = `rgba(185, 130, 55, ${alpha})`;
+                                overlayCtx.fill();
+                                overlayCtx.strokeStyle = `rgba(85, 45, 10, ${Math.min(1, alpha * 1.1)})`;
+                                overlayCtx.lineWidth = Math.max(1.2, widthPx * 0.1);
+                                overlayCtx.stroke();
+                                overlayCtx.beginPath();
+                                overlayCtx.moveTo(0, -heightPx * 0.3);
+                                overlayCtx.lineTo(0, heightPx * 0.5);
+                                overlayCtx.moveTo(-widthPx * 0.18, -heightPx * 0.1);
+                                overlayCtx.lineTo(-widthPx * 0.05, heightPx * 0.4);
+                                overlayCtx.moveTo(widthPx * 0.18, -heightPx * 0.05);
+                                overlayCtx.lineTo(widthPx * 0.05, heightPx * 0.45);
+                                overlayCtx.strokeStyle = `rgba(255, 230, 190, ${alpha * 0.7})`;
+                                overlayCtx.lineWidth = Math.max(0.8, widthPx * 0.06);
+                                overlayCtx.stroke();
                                 overlayCtx.restore();
                         }
 
