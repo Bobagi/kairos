@@ -3,236 +3,228 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 
-        import type { GameMode, GameSummary } from '$lib/api/GameClient';
-        import {
-                checkChronosHealthStatus,
-                endChronosGameSessionOnServer,
-                expireInactiveChronosGames,
-                fetchAuthenticatedChronosUserProfile,
-                fetchMyChronosGameStatistics,
-                listAllActiveChronosGames,
-                listAuthenticatedChronosPlayerActiveGames,
-                loginChronosUserAccount,
-                startAttributeDuelChronosGameForPlayer,
-                startClassicChronosGameForPlayer
-        } from '$lib/api/GameClient';
-        import FriendsPanel from '$lib/components/FriendsPanel.svelte';
-        import './mainpage.css';
+	import type { GameMode, GameSummary } from '$lib/api/GameClient';
+	import {
+		checkChronosHealthStatus,
+		endChronosGameSessionOnServer,
+		expireInactiveChronosGames,
+		fetchAuthenticatedChronosUserProfile,
+		fetchMyChronosGameStatistics,
+		listAllActiveChronosGames,
+		listAuthenticatedChronosPlayerActiveGames,
+		loginChronosUserAccount,
+		startAttributeDuelChronosGameForPlayer,
+		startClassicChronosGameForPlayer
+	} from '$lib/api/GameClient';
+	import FriendsPanel from '$lib/components/FriendsPanel.svelte';
+	import './mainpage.css';
 
-        type AuthenticatedChronosUser = { id: string; username: string; role: 'USER' | 'ADMIN' };
-        type ChronosActiveGameSummary = GameSummary & {
-                playerBId?: string | null;
-                players?: string[] | null;
-                lastActivity?: number | null;
-        };
+	type AuthenticatedChronosUser = { id: string; username: string; role: 'USER' | 'ADMIN' };
+	type ChronosActiveGameSummary = GameSummary & {
+		playerBId?: string | null;
+		players?: string[] | null;
+		lastActivity?: number | null;
+	};
 
-        let authenticationToken: string | null = null;
-        let authenticatedUser: AuthenticatedChronosUser | null = null;
+	let authenticationToken: string | null = null;
+	let authenticatedUser: AuthenticatedChronosUser | null = null;
 
-        let usernameInputValue = '';
-        let passwordInputValue = '';
-        let loginErrorMessage: string | null = null;
+	let usernameInputValue = '';
+	let passwordInputValue = '';
+	let loginErrorMessage: string | null = null;
 
-        let backendHealthMessage = 'Checking server…';
-        let allActiveChronosGames: ChronosActiveGameSummary[] = [];
-        let myActiveChronosGames: ChronosActiveGameSummary[] = [];
-        $: isAdmin = authenticatedUser?.role === 'ADMIN';
-        let showFriendsPanel = false;
+	let backendHealthMessage = 'Checking server…';
+	let allActiveChronosGames: ChronosActiveGameSummary[] = [];
+	let myActiveChronosGames: ChronosActiveGameSummary[] = [];
+	$: isAdmin = authenticatedUser?.role === 'ADMIN';
+	let showFriendsPanel = false;
 
 	/* ---- stats ---- */
 	let statGamesPlayed = 0;
 	let statGamesWon = 0;
 	let statGamesDrawn = 0;
 
-        function isGameOwnedByPlayer(
-                gameSummary: ChronosActiveGameSummary,
-                playerIdentifier: string
-        ) {
-                if (Array.isArray(gameSummary?.players)) return gameSummary.players.includes(playerIdentifier);
-                if (gameSummary?.playerAId)
-                        return (
-                                gameSummary.playerAId === playerIdentifier ||
-                                gameSummary?.playerBId === playerIdentifier
-                        );
-                return false;
-        }
-        function resolveGameIdentifier(gameSummary: ChronosActiveGameSummary) {
-                return gameSummary.id ?? (gameSummary as { gameId?: string }).gameId ?? '';
-        }
-        function resolveLastActivityTimestamp(gameSummary: ChronosActiveGameSummary): number | null {
-                return typeof gameSummary?.lastActivity === 'number' ? gameSummary.lastActivity : null;
-        }
-        function formatRelativeLastActivity(timestamp: number | null) {
-                if (!timestamp) return '—';
-                const elapsedMilliseconds = Date.now() - timestamp;
-                const elapsedMinutes = Math.round(elapsedMilliseconds / 60000);
-                if (elapsedMinutes < 1) return 'just now';
-                if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-                const elapsedHours = Math.round(elapsedMinutes / 60);
-                return `${elapsedHours}h ago`;
-        }
+	function isGameOwnedByPlayer(gameSummary: ChronosActiveGameSummary, playerIdentifier: string) {
+		if (Array.isArray(gameSummary?.players)) return gameSummary.players.includes(playerIdentifier);
+		if (gameSummary?.playerAId)
+			return (
+				gameSummary.playerAId === playerIdentifier || gameSummary?.playerBId === playerIdentifier
+			);
+		return false;
+	}
+	function resolveGameIdentifier(gameSummary: ChronosActiveGameSummary) {
+		return gameSummary.id ?? (gameSummary as { gameId?: string }).gameId ?? '';
+	}
+	function resolveLastActivityTimestamp(gameSummary: ChronosActiveGameSummary): number | null {
+		return typeof gameSummary?.lastActivity === 'number' ? gameSummary.lastActivity : null;
+	}
+	function formatRelativeLastActivity(timestamp: number | null) {
+		if (!timestamp) return '—';
+		const elapsedMilliseconds = Date.now() - timestamp;
+		const elapsedMinutes = Math.round(elapsedMilliseconds / 60000);
+		if (elapsedMinutes < 1) return 'just now';
+		if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+		const elapsedHours = Math.round(elapsedMinutes / 60);
+		return `${elapsedHours}h ago`;
+	}
 
-        async function loadChronosDashboardData() {
-                try {
-                        backendHealthMessage = await checkChronosHealthStatus();
-                } catch (error) {
-                        backendHealthMessage = (error as Error).message;
-                }
+	async function loadChronosDashboardData() {
+		try {
+			backendHealthMessage = await checkChronosHealthStatus();
+		} catch (error) {
+			backendHealthMessage = (error as Error).message;
+		}
 
-                myActiveChronosGames = [];
-                allActiveChronosGames = [];
-                statGamesPlayed = 0;
-                statGamesWon = 0;
-                statGamesDrawn = 0;
+		myActiveChronosGames = [];
+		allActiveChronosGames = [];
+		statGamesPlayed = 0;
+		statGamesWon = 0;
+		statGamesDrawn = 0;
 
-                if (!authenticatedUser || !authenticationToken) return;
+		if (!authenticatedUser || !authenticationToken) return;
 
-                try {
-                        if (isAdmin) {
-                                allActiveChronosGames = await listAllActiveChronosGames(authenticationToken);
-                                myActiveChronosGames = allActiveChronosGames.filter((gameSummary) =>
-                                        isGameOwnedByPlayer(gameSummary, authenticatedUser!.id)
-                                );
-                        } else {
-                                myActiveChronosGames = await listAuthenticatedChronosPlayerActiveGames(
-                                        authenticationToken
-                                );
-                        }
-                        const statistics = await fetchMyChronosGameStatistics(authenticationToken);
-                        statGamesPlayed = statistics.gamesPlayed ?? 0;
-                        statGamesWon = statistics.gamesWon ?? 0;
-                        statGamesDrawn = statistics.gamesDrawn ?? 0;
-                } catch {
-                        myActiveChronosGames = [];
-                        allActiveChronosGames = [];
-                        statGamesPlayed = 0;
-                        statGamesWon = 0;
-                        statGamesDrawn = 0;
-                }
-        }
+		try {
+			if (isAdmin) {
+				allActiveChronosGames = await listAllActiveChronosGames(authenticationToken);
+				myActiveChronosGames = allActiveChronosGames.filter((gameSummary) =>
+					isGameOwnedByPlayer(gameSummary, authenticatedUser!.id)
+				);
+			} else {
+				myActiveChronosGames = await listAuthenticatedChronosPlayerActiveGames(authenticationToken);
+			}
+			const statistics = await fetchMyChronosGameStatistics(authenticationToken);
+			statGamesPlayed = statistics.gamesPlayed ?? 0;
+			statGamesWon = statistics.gamesWon ?? 0;
+			statGamesDrawn = statistics.gamesDrawn ?? 0;
+		} catch {
+			myActiveChronosGames = [];
+			allActiveChronosGames = [];
+			statGamesPlayed = 0;
+			statGamesWon = 0;
+			statGamesDrawn = 0;
+		}
+	}
 
-        onMount(async () => {
-                if (browser) authenticationToken = localStorage.getItem('token');
-                if (authenticationToken) {
-                        try {
-                                authenticatedUser = await fetchAuthenticatedChronosUserProfile(
-                                        authenticationToken
-                                );
-                        } catch {
-                                authenticationToken = null;
-                                if (browser) localStorage.removeItem('token');
-                        }
-                }
-                await loadChronosDashboardData();
-        });
+	onMount(async () => {
+		if (browser) authenticationToken = localStorage.getItem('token');
+		if (authenticationToken) {
+			try {
+				authenticatedUser = await fetchAuthenticatedChronosUserProfile(authenticationToken);
+			} catch {
+				authenticationToken = null;
+				if (browser) localStorage.removeItem('token');
+			}
+		}
+		await loadChronosDashboardData();
+	});
 
-        async function loginToChronos() {
-                loginErrorMessage = null;
-                try {
-                        const authenticationResponse = await loginChronosUserAccount(
-                                usernameInputValue.trim(),
-                                passwordInputValue
-                        );
-                        authenticationToken = authenticationResponse.accessToken;
-                        authenticatedUser = authenticationResponse.user;
-                        passwordInputValue = '';
-                        if (browser && authenticationToken) localStorage.setItem('token', authenticationToken);
-                        await loadChronosDashboardData();
-                        showFriendsPanel = false;
-                } catch (error) {
-                        console.error('Login failed', error);
-                        loginErrorMessage = 'Invalid username or password.';
-                }
-        }
+	async function loginToChronos() {
+		loginErrorMessage = null;
+		try {
+			const authenticationResponse = await loginChronosUserAccount(
+				usernameInputValue.trim(),
+				passwordInputValue
+			);
+			authenticationToken = authenticationResponse.accessToken;
+			authenticatedUser = authenticationResponse.user;
+			passwordInputValue = '';
+			if (browser && authenticationToken) localStorage.setItem('token', authenticationToken);
+			await loadChronosDashboardData();
+			showFriendsPanel = false;
+		} catch (error) {
+			console.error('Login failed', error);
+			loginErrorMessage = 'Invalid username or password.';
+		}
+	}
 
-        function logoutFromChronos() {
-                authenticationToken = null;
-                authenticatedUser = null;
-                if (browser) localStorage.removeItem('token');
-                allActiveChronosGames = [];
-                myActiveChronosGames = [];
-                statGamesPlayed = 0;
-                statGamesWon = 0;
-                statGamesDrawn = 0;
-                showFriendsPanel = false;
-        }
+	function logoutFromChronos() {
+		authenticationToken = null;
+		authenticatedUser = null;
+		if (browser) localStorage.removeItem('token');
+		allActiveChronosGames = [];
+		myActiveChronosGames = [];
+		statGamesPlayed = 0;
+		statGamesWon = 0;
+		statGamesDrawn = 0;
+		showFriendsPanel = false;
+	}
 
-        async function createNewClassicChronosGame() {
-                if (!authenticatedUser) return;
-                try {
-                        const { gameId } = await startClassicChronosGameForPlayer(authenticatedUser.id);
-                        goto(`/game/classic/${gameId}`);
-                        return;
-                } catch (error) {
-                        console.error(error);
-                }
-                await loadChronosDashboardData();
-        }
+	async function createNewClassicChronosGame() {
+		if (!authenticatedUser) return;
+		try {
+			const { gameId } = await startClassicChronosGameForPlayer(authenticatedUser.id);
+			goto(`/game/classic/${gameId}`);
+			return;
+		} catch (error) {
+			console.error(error);
+		}
+		await loadChronosDashboardData();
+	}
 
-        async function createNewAttributeDuelChronosGame() {
-                if (!authenticatedUser) return;
-                try {
-                        const { gameId } = await startAttributeDuelChronosGameForPlayer(authenticatedUser.id);
-                        goto(`/game/duel/${gameId}`);
-                        return;
-                } catch (error) {
-                        console.error(error);
-                }
-                await loadChronosDashboardData();
-        }
+	async function createNewAttributeDuelChronosGame() {
+		if (!authenticatedUser) return;
+		try {
+			const { gameId } = await startAttributeDuelChronosGameForPlayer(authenticatedUser.id);
+			goto(`/game/duel/${gameId}`);
+			return;
+		} catch (error) {
+			console.error(error);
+		}
+		await loadChronosDashboardData();
+	}
 
-        async function expireInactiveChronosGamesAndRefreshDashboard() {
-                if (!isAdmin) return;
-                try {
-                        await expireInactiveChronosGames();
-                } catch (error) {
-                        console.error(error);
-                }
-                await loadChronosDashboardData();
-        }
+	async function expireInactiveChronosGamesAndRefreshDashboard() {
+		if (!isAdmin) return;
+		try {
+			await expireInactiveChronosGames();
+		} catch (error) {
+			console.error(error);
+		}
+		await loadChronosDashboardData();
+	}
 
-        function navigateToChronosGame(gameIdentifier: string, gameMode: string) {
-                if (gameMode === 'CLASSIC') goto(`/game/classic/${gameIdentifier}`);
-                else if (gameMode === 'ATTRIBUTE_DUEL' || gameMode === 'DUEL')
-                        goto(`/game/duel/${gameIdentifier}`);
-                else goto(`/game/${gameIdentifier}`);
-        }
+	function navigateToChronosGame(gameIdentifier: string, gameMode: string) {
+		if (gameMode === 'CLASSIC') goto(`/game/classic/${gameIdentifier}`);
+		else if (gameMode === 'ATTRIBUTE_DUEL' || gameMode === 'DUEL')
+			goto(`/game/duel/${gameIdentifier}`);
+		else goto(`/game/${gameIdentifier}`);
+	}
 
-        function handleFriendMatchNavigation(event: CustomEvent<{ gameId: string; mode: GameMode }>) {
-                const { gameId, mode } = event.detail;
-                showFriendsPanel = false;
-                if (mode === 'CLASSIC') goto(`/game/classic/${gameId}`);
-                else goto(`/game/duel/${gameId}`);
-        }
+	function handleFriendMatchNavigation(event: CustomEvent<{ gameId: string; mode: GameMode }>) {
+		const { gameId, mode } = event.detail;
+		showFriendsPanel = false;
+		if (mode === 'CLASSIC') goto(`/game/classic/${gameId}`);
+		else goto(`/game/duel/${gameId}`);
+	}
 
-        async function refreshDashboardAfterFriendAction() {
-                await loadChronosDashboardData();
-        }
+	async function refreshDashboardAfterFriendAction() {
+		await loadChronosDashboardData();
+	}
 
-        $: if (!authenticatedUser || !authenticationToken) {
-                showFriendsPanel = false;
-        }
+	$: if (!authenticatedUser || !authenticationToken) {
+		showFriendsPanel = false;
+	}
 
-	const AVATAR_PRIMARY = '/avatars/placeholder.png';
-	const AVATAR_FALLBACK = 'https://bobagi.space/images/cards/23.png';
-        function onAvatarImageError(event: Event) {
-                const imageElement = event.currentTarget as HTMLImageElement;
-                if (!imageElement) return;
-                imageElement.onerror = null;
-                imageElement.src = AVATAR_FALLBACK;
-        }
+	const AVATAR_FALLBACK = '/avatars/placeholder.png';
+	const AVATAR_PRIMARY = 'https://bobagi.space/images/cards/23.png';
+	function onAvatarImageError(event: Event) {
+		const imageElement = event.currentTarget as HTMLImageElement;
+		if (!imageElement) return;
+		imageElement.onerror = null;
+		imageElement.src = AVATAR_FALLBACK;
+	}
 
-        $: statActive = myActiveChronosGames.length;
-        $: statLastUpdated =
-                myActiveChronosGames.length > 0
-                        ? formatRelativeLastActivity(
-                                  Math.max(
-                                          ...myActiveChronosGames.map(
-                                                  (gameSummary) => resolveLastActivityTimestamp(gameSummary) || 0
-                                          )
-                                  )
-                          )
-                        : '—';
+	$: statActive = myActiveChronosGames.length;
+	$: statLastUpdated =
+		myActiveChronosGames.length > 0
+			? formatRelativeLastActivity(
+					Math.max(
+						...myActiveChronosGames.map(
+							(gameSummary) => resolveLastActivityTimestamp(gameSummary) || 0
+						)
+					)
+				)
+			: '—';
 	$: statRank = 'Bronze I';
 </script>
 
@@ -278,11 +270,18 @@
 					>
 				</div>
 			</form>
-			{#if loginErrorMessage}<p class="empty-text" style="color:#ffbdbd">{loginErrorMessage}</p>{/if}
+			{#if loginErrorMessage}<p class="empty-text" style="color:#ffbdbd">
+					{loginErrorMessage}
+				</p>{/if}
 		{:else}
 			<div class="profile-card">
 				<div class="avatar-wrap" aria-hidden="true">
-					<img src={AVATAR_PRIMARY} alt="User avatar" loading="lazy" on:error={onAvatarImageError} />
+					<img
+						src={AVATAR_PRIMARY}
+						alt="User avatar"
+						loading="lazy"
+						on:error={onAvatarImageError}
+					/>
 				</div>
 
 				<div class="profile-main">
@@ -295,17 +294,16 @@
 							<button class="button button-neutral" on:click={() => goto('/gallery')}
 								>🖼️ Gallery</button
 							>
-                                                    <button
-                                                            class="button button-accent"
-                                                            on:click={() =>
-                                                                    authenticatedUser && authenticationToken
-                                                                            ? (showFriendsPanel = true)
-                                                                            : (loginErrorMessage = 'Login required to open friends panel.')
-                                                            }
-                                                            disabled={!authenticatedUser || !authenticationToken}
-                                                    >
-                                                            👥 Friends
-                                                    </button>
+							<button
+								class="button button-accent"
+								on:click={() =>
+									authenticatedUser && authenticationToken
+										? (showFriendsPanel = true)
+										: (loginErrorMessage = 'Login required to open friends panel.')}
+								disabled={!authenticatedUser || !authenticationToken}
+							>
+								👥 Friends
+							</button>
 							<button class="button button-ghost" on:click={logoutFromChronos}>Logout</button>
 						</div>
 					</div>
@@ -338,33 +336,40 @@
 					</div>
 
 					<div class="profile-cta">
-						<button class="button button-danger" on:click={createNewAttributeDuelChronosGame}>⚔️ Start Duel</button>
+						<button class="button button-danger" on:click={createNewAttributeDuelChronosGame}
+							>⚔️ Start Duel</button
+						>
 						{#if isAdmin}
-							<button class="button button-ghost" on:click={expireInactiveChronosGamesAndRefreshDashboard}
-								>⏳ Expire old games</button
+							<button
+								class="button button-ghost"
+								on:click={expireInactiveChronosGamesAndRefreshDashboard}>⏳ Expire old games</button
 							>
-{/if}
+						{/if}
 
-{#if showFriendsPanel}
-        {#if authenticatedUser && authenticationToken}
-                <FriendsPanel
-                        token={authenticationToken}
-                        currentUserId={authenticatedUser.id}
-                        on:close={() => (showFriendsPanel = false)}
-                        on:navigateToGame={handleFriendMatchNavigation}
-                        on:refreshDashboard={refreshDashboardAfterFriendAction}
-                />
-        {:else}
-                <div class="friends-overlay-message">
-                        <div class="friends-overlay-card">
-                                <p>You need to log in to manage friends.</p>
-                                <button type="button" class="button button-accent" on:click={() => (showFriendsPanel = false)}>
-                                        Close
-                                </button>
-                        </div>
-                </div>
-        {/if}
-{/if}
+						{#if showFriendsPanel}
+							{#if authenticatedUser && authenticationToken}
+								<FriendsPanel
+									token={authenticationToken}
+									currentUserId={authenticatedUser.id}
+									on:close={() => (showFriendsPanel = false)}
+									on:navigateToGame={handleFriendMatchNavigation}
+									on:refreshDashboard={refreshDashboardAfterFriendAction}
+								/>
+							{:else}
+								<div class="friends-overlay-message">
+									<div class="friends-overlay-card">
+										<p>You need to log in to manage friends.</p>
+										<button
+											type="button"
+											class="button button-accent"
+											on:click={() => (showFriendsPanel = false)}
+										>
+											Close
+										</button>
+									</div>
+								</div>
+							{/if}
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -393,7 +398,10 @@
 									{#if isAdmin}
 										<button
 											class="button button-danger"
-											on:click={() => endChronosGameSessionOnServer(resolveGameIdentifier(g)).then(loadChronosDashboardData)}
+											on:click={() =>
+												endChronosGameSessionOnServer(resolveGameIdentifier(g)).then(
+													loadChronosDashboardData
+												)}
 											title="Finish the game">🗑️ Finish</button
 										>
 									{/if}
@@ -418,17 +426,23 @@
 										<p class="game-meta">
 											Mode: <b>{g.mode}</b>{#if g.players}
 												• Players: {g.players.join(' · ')}{/if}{#if resolveLastActivityTimestamp(g)}
-												• Updated: {formatRelativeLastActivity(resolveLastActivityTimestamp(g))}{/if}
+												• Updated: {formatRelativeLastActivity(
+													resolveLastActivityTimestamp(g)
+												)}{/if}
 										</p>
 									</div>
 									<div class="game-actions">
 										<button
 											class="button button-neutral"
-											on:click={() => navigateToChronosGame(resolveGameIdentifier(g), g.mode)}>➡️ Open</button
+											on:click={() => navigateToChronosGame(resolveGameIdentifier(g), g.mode)}
+											>➡️ Open</button
 										>
 										<button
 											class="button button-danger"
-											on:click={() => endChronosGameSessionOnServer(resolveGameIdentifier(g)).then(loadChronosDashboardData)}>🗑️ Finish</button
+											on:click={() =>
+												endChronosGameSessionOnServer(resolveGameIdentifier(g)).then(
+													loadChronosDashboardData
+												)}>🗑️ Finish</button
 										>
 									</div>
 								</li>
@@ -452,32 +466,32 @@
 		grid-template-columns: 1fr;
 		gap: 14px;
 	}
-        .auth-actions.stacked {
-                display: grid;
-                gap: 10px;
-                max-width: 260px;
-        }
+	.auth-actions.stacked {
+		display: grid;
+		gap: 10px;
+		max-width: 260px;
+	}
 
-        .friends-overlay-message {
-                position: fixed;
-                inset: 0;
-                background: rgba(7, 10, 18, 0.82);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 1000;
-                padding: 20px;
-        }
+	.friends-overlay-message {
+		position: fixed;
+		inset: 0;
+		background: rgba(7, 10, 18, 0.82);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 1000;
+		padding: 20px;
+	}
 
-        .friends-overlay-card {
-                background: rgba(16, 20, 30, 0.92);
-                color: #f5f6f9;
-                padding: 24px;
-                border-radius: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                text-align: center;
-                display: grid;
-                gap: 16px;
-                max-width: 340px;
-        }
+	.friends-overlay-card {
+		background: rgba(16, 20, 30, 0.92);
+		color: #f5f6f9;
+		padding: 24px;
+		border-radius: 16px;
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		text-align: center;
+		display: grid;
+		gap: 16px;
+		max-width: 340px;
+	}
 </style>
