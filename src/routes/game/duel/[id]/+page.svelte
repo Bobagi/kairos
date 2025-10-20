@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { page as sveltePageStore } from '$app/stores';
+        import { browser } from '$app/environment';
+        import { page as sveltePageStore } from '$app/stores';
         import type { ChronosCardCatalogItem } from '$lib/api/GameClient';
         import {
                 advanceChronosDuel,
@@ -9,6 +10,7 @@
                 fetchChronosGameResult,
                 fetchChronosGameStateById,
                 fetchMultipleChronosCardMetadata,
+                surrenderChronosGame,
                 unchooseChronosDuelCard
         } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
@@ -40,6 +42,7 @@
 	const cardBackImageUrl = '/frames/card-back.png';
 
         let errorMessageText: string | null = null;
+        let authenticationToken: string | null = null;
         let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
         $: currentGameId = $sveltePageStore.params.id;
@@ -454,17 +457,32 @@
 		await loadGameStateOrFinalResult();
 	}
 
-	async function onCenterCardReturnToHand() {
-		const state = $gameStateStore;
-		if (!state) return;
-		if (state.mode !== 'ATTRIBUTE_DUEL') return;
-		if (state.duelStage === 'REVEAL') return;
-		if (!state.duelCenter?.aCardCode) return;
-		const me = state.players[0];
-		lastReturnedCode = state.duelCenter.aCardCode || null;
-		await unchooseChronosDuelCard(currentGameId, me);
-		await loadGameStateOrFinalResult();
-	}
+        async function onCenterCardReturnToHand() {
+                const state = $gameStateStore;
+                if (!state) return;
+                if (state.mode !== 'ATTRIBUTE_DUEL') return;
+                if (state.duelStage === 'REVEAL') return;
+                if (!state.duelCenter?.aCardCode) return;
+                const me = state.players[0];
+                lastReturnedCode = state.duelCenter.aCardCode || null;
+                await unchooseChronosDuelCard(currentGameId, me);
+                await loadGameStateOrFinalResult();
+        }
+
+        async function surrenderDuelGame() {
+                if (isGameOver()) return;
+                if (!authenticationToken) {
+                        errorMessageText = 'Login required to surrender.';
+                        return;
+                }
+                try {
+                        await surrenderChronosGame(currentGameId, authenticationToken);
+                        await loadGameStateOrFinalResult();
+                } catch (error) {
+                        console.error('Failed to surrender duel game', error);
+                        errorMessageText = 'Unable to surrender match.';
+                }
+        }
 
 	async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
 		if (isGameOver()) return;
@@ -1031,10 +1049,11 @@
                 return null;
         }
 
-	onMount(async () => {
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
+        onMount(async () => {
+                if (browser) authenticationToken = localStorage.getItem('token');
+                await loadGameStateOrFinalResult();
+                setupMyHandResizeObserver();
+        });
 
 	onDestroy(() => {
 		if (advanceTimer) window.clearTimeout(advanceTimer);
@@ -1178,9 +1197,25 @@
 </svelte:head>
 
 <div class="fixed-top-bar">
-	<a href="/" class="home-btn">← Home</a>
-	<div class="mode-pill"><strong>Mode:</strong> ATTRIBUTE_DUEL</div>
+        <a href="/" class="home-btn">← Home</a>
+        <div class="mode-pill"><strong>Mode:</strong> ATTRIBUTE_DUEL</div>
 </div>
+
+{#if !($gameStateStore?.winner ?? finalGameResult?.winner ?? null)}
+        <div class="surrender-row">
+                <button
+                        type="button"
+                        class="surrender-button"
+                        on:click={surrenderDuelGame}
+                        disabled={!authenticationToken}
+                >
+                        🏳️ Surrender
+                </button>
+                {#if !authenticationToken}
+                        <span class="surrender-hint">Login required to surrender.</span>
+                {/if}
+        </div>
+{/if}
 
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
@@ -1507,3 +1542,33 @@
 </div>
 
 <div class="fx-layer" bind:this={fxLayerElement}></div>
+
+<style>
+        .surrender-row {
+                margin: 12px auto;
+                max-width: 320px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+        }
+
+        .surrender-button {
+                padding: 8px 18px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                background: rgba(220, 76, 100, 0.25);
+                color: #ffe2e8;
+                cursor: pointer;
+        }
+
+        .surrender-button:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+        }
+
+        .surrender-hint {
+                font-size: 0.85rem;
+                color: rgba(255, 237, 240, 0.75);
+        }
+</style>

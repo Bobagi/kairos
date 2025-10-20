@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { page as sveltePageStore } from '$app/stores';
+        import { browser } from '$app/environment';
+        import { page as sveltePageStore } from '$app/stores';
         import {
                 fetchChronosGameResult,
                 fetchChronosGameStateById,
                 fetchMultipleChronosCardMetadata,
                 playCardInChronosGame,
-                skipChronosGameTurn
+                skipChronosGameTurn,
+                surrenderChronosGame
         } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import CenterPanel from '$lib/components/CenterPanel.svelte';
@@ -34,7 +36,8 @@
 	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
 
-	let errorMessageText: string | null = null;
+        let errorMessageText: string | null = null;
+        let authenticationToken: string | null = null;
 	let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
 	$: currentGameId = $sveltePageStore.params.id;
@@ -285,18 +288,34 @@
             );
 	}
 
-	async function skipTurnClassic() {
-		if (isGameOver()) return;
-		const me = $gameStateStore?.players?.[0] ?? 'playerA';
+        async function skipTurnClassic() {
+                if (isGameOver()) return;
+                const me = $gameStateStore?.players?.[0] ?? 'playerA';
             await skipChronosGameTurn(currentGameId, me);
-		await loadGameStateOrFinalResult();
-	}
+                await loadGameStateOrFinalResult();
+        }
 
-	onMount(async () => {
-		await fetchTemplate();
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
+        async function surrenderClassicGame() {
+                if (isGameOver()) return;
+                if (!authenticationToken) {
+                        errorMessageText = 'Login required to surrender.';
+                        return;
+                }
+                try {
+                        await surrenderChronosGame(currentGameId, authenticationToken);
+                        await loadGameStateOrFinalResult();
+                } catch (error) {
+                        console.error('Failed to surrender classic game', error);
+                        errorMessageText = 'Unable to surrender match.';
+                }
+        }
+
+        onMount(async () => {
+                if (browser) authenticationToken = localStorage.getItem('token');
+                await fetchTemplate();
+                await loadGameStateOrFinalResult();
+                setupMyHandResizeObserver();
+        });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
@@ -343,6 +362,36 @@
 	<a href="/" class="home-btn">← Home</a>
 	<div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
 </div>
+
+<style>
+        .surrender-row {
+                margin: 12px auto;
+                max-width: 320px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+        }
+
+        .surrender-button {
+                padding: 8px 18px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                background: rgba(220, 76, 100, 0.25);
+                color: #ffe2e8;
+                cursor: pointer;
+        }
+
+        .surrender-button:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+        }
+
+        .surrender-hint {
+                font-size: 0.85rem;
+                color: rgba(255, 237, 240, 0.75);
+        }
+</style>
 
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
@@ -397,12 +446,28 @@
 		log={$gameStateStore?.log}
 		onRefresh={loadGameStateOrFinalResult}
 		onSkipTurn={skipTurnClassic}
-	/>
+        />
 
-	{#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
-		<div class="notice success" style="margin-top:12px; text-align:center;">
-			Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
-		</div>
+        {#if !($gameStateStore?.winner ?? finalGameResult?.winner ?? null)}
+                <div class="surrender-row">
+                        <button
+                                type="button"
+                                class="surrender-button"
+                                on:click={surrenderClassicGame}
+                                disabled={!authenticationToken}
+                        >
+                                🏳️ Surrender
+                        </button>
+                        {#if !authenticationToken}
+                                <span class="surrender-hint">Login required to surrender.</span>
+                        {/if}
+                </div>
+        {/if}
+
+        {#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
+                <div class="notice success" style="margin-top:12px; text-align:center;">
+                        Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
+                </div>
 		<div style="margin-top:8px;text-align:center;">
 			<a href="/" class="btn" style="text-decoration:none;">Back to home</a>
 		</div>

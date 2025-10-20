@@ -53,6 +53,34 @@ export type GameMode = 'CLASSIC' | 'ATTRIBUTE_DUEL';
 export type GameSummary = { id: string; playerAId: string; mode: GameMode };
 export type GameResult = { winner: string | null; log: string[] };
 
+export type ChronosPlayerSummary = { id: string; username: string };
+
+export type ChronosFriendSummary = {
+        friendshipId: string;
+        friend: ChronosPlayerSummary;
+        status: 'PENDING' | 'ACCEPTED' | 'BLOCKED';
+        blockedByMe: boolean;
+};
+
+export type ChronosIncomingFriendRequest = {
+        friendshipId: string;
+        requester: ChronosPlayerSummary;
+        createdAt: string;
+};
+
+export type ChronosFriendChatMessage = {
+        id: string;
+        senderId: string;
+        recipientId: string;
+        body: string;
+        createdAt: string;
+};
+
+export type ChronosFriendChatHistory = {
+        friendshipId: string;
+        messages: ChronosFriendChatMessage[];
+};
+
 type ChronosRawCardMetadata = {
         number?: number | string | null;
 } | null;
@@ -199,6 +227,32 @@ export async function endChronosGameSessionOnServer(
         return performChronosApiRequestReturningJson(
                 `/game/end/${encodeURIComponent(gameIdentifier)}`,
                 { method: 'DELETE' },
+                token
+        );
+}
+
+export async function startChronosGameWithFriend(
+        friendIdentifier: string,
+        mode: GameMode,
+        token: string
+): Promise<{ gameId: string }> {
+        return performChronosApiRequestReturningJson(
+                '/game/start-with-friend',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ friendId: friendIdentifier, mode })
+                },
+                token
+        );
+}
+
+export async function surrenderChronosGame(gameIdentifier: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/game/surrender',
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ gameId: gameIdentifier })
+                },
                 token
         );
 }
@@ -406,4 +460,88 @@ export type ChronosCardCatalogItem = {
 };
 export async function fetchChronosCardCatalog(): Promise<ChronosCardCatalogItem[]> {
         return performChronosApiRequestReturningJson('/game/cards');
+}
+
+/* ---------- Friends ---------- */
+export async function searchChronosPlayers(
+        query: string,
+        token: string
+): Promise<ChronosPlayerSummary[]> {
+        const trimmed = query.trim();
+        if (!trimmed) return [];
+        return performChronosApiRequestReturningJson(
+                `/friends/search?q=${encodeURIComponent(trimmed)}`,
+                {},
+                token
+        );
+}
+
+export async function listChronosFriends(token: string): Promise<ChronosFriendSummary[]> {
+        return performChronosApiRequestReturningJson('/friends', {}, token);
+}
+
+export async function listChronosFriendRequests(
+        token: string
+): Promise<ChronosIncomingFriendRequest[]> {
+        return performChronosApiRequestReturningJson('/friends/requests', {}, token);
+}
+
+export async function sendChronosFriendRequest(targetId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/friends/request',
+                { method: 'POST', body: JSON.stringify({ targetId }) },
+                token
+        );
+}
+
+export async function respondChronosFriendRequest(
+        friendshipId: string,
+        accept: boolean,
+        token: string
+): Promise<unknown> {
+        const action = accept ? 'accept' : 'reject';
+        return performChronosApiRequestReturningJson(
+                `/friends/request/${encodeURIComponent(friendshipId)}/${action}`,
+                { method: 'POST' },
+                token
+        );
+}
+
+export async function removeChronosFriend(friendshipId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                `/friends/${encodeURIComponent(friendshipId)}`,
+                { method: 'DELETE' },
+                token
+        );
+}
+
+export async function blockChronosPlayer(targetId: string, token: string): Promise<unknown> {
+        return performChronosApiRequestReturningJson(
+                '/friends/block',
+                { method: 'POST', body: JSON.stringify({ targetId }) },
+                token
+        );
+}
+
+export async function fetchChronosFriendChat(
+        friendId: string,
+        token: string
+): Promise<ChronosFriendChatHistory> {
+        return performChronosApiRequestReturningJson(
+                `/friends/chat/${encodeURIComponent(friendId)}`,
+                {},
+                token
+        );
+}
+
+export async function sendChronosFriendMessage(
+        friendId: string,
+        message: string,
+        token: string
+): Promise<ChronosFriendChatMessage> {
+        return performChronosApiRequestReturningJson(
+                `/friends/chat/${encodeURIComponent(friendId)}`,
+                { method: 'POST', body: JSON.stringify({ message }) },
+                token
+        );
 }

@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 
-        import type { GameSummary } from '$lib/api/GameClient';
+        import type { GameMode, GameSummary } from '$lib/api/GameClient';
         import {
                 checkChronosHealthStatus,
                 endChronosGameSessionOnServer,
@@ -16,7 +16,8 @@
                 startAttributeDuelChronosGameForPlayer,
                 startClassicChronosGameForPlayer
         } from '$lib/api/GameClient';
-	import './mainpage.css';
+        import FriendsPanel from '$lib/components/FriendsPanel.svelte';
+        import './mainpage.css';
 
         type AuthenticatedChronosUser = { id: string; username: string; role: 'USER' | 'ADMIN' };
         type ChronosActiveGameSummary = GameSummary & {
@@ -36,6 +37,7 @@
         let allActiveChronosGames: ChronosActiveGameSummary[] = [];
         let myActiveChronosGames: ChronosActiveGameSummary[] = [];
         $: isAdmin = authenticatedUser?.role === 'ADMIN';
+        let showFriendsPanel = false;
 
 	/* ---- stats ---- */
 	let statGamesPlayed = 0;
@@ -136,6 +138,7 @@
                         passwordInputValue = '';
                         if (browser && authenticationToken) localStorage.setItem('token', authenticationToken);
                         await loadChronosDashboardData();
+                        showFriendsPanel = false;
                 } catch (error) {
                         console.error('Login failed', error);
                         loginErrorMessage = 'Invalid username or password.';
@@ -151,6 +154,7 @@
                 statGamesPlayed = 0;
                 statGamesWon = 0;
                 statGamesDrawn = 0;
+                showFriendsPanel = false;
         }
 
         async function createNewClassicChronosGame() {
@@ -192,6 +196,21 @@
                 else if (gameMode === 'ATTRIBUTE_DUEL' || gameMode === 'DUEL')
                         goto(`/game/duel/${gameIdentifier}`);
                 else goto(`/game/${gameIdentifier}`);
+        }
+
+        function handleFriendMatchNavigation(event: CustomEvent<{ gameId: string; mode: GameMode }>) {
+                const { gameId, mode } = event.detail;
+                showFriendsPanel = false;
+                if (mode === 'CLASSIC') goto(`/game/classic/${gameId}`);
+                else goto(`/game/duel/${gameId}`);
+        }
+
+        async function refreshDashboardAfterFriendAction() {
+                await loadChronosDashboardData();
+        }
+
+        $: if (!authenticatedUser || !authenticationToken) {
+                showFriendsPanel = false;
         }
 
 	const AVATAR_PRIMARY = '/avatars/placeholder.png';
@@ -276,9 +295,17 @@
 							<button class="button button-neutral" on:click={() => goto('/gallery')}
 								>🖼️ Gallery</button
 							>
-							<button class="button button-accent" on:click={() => alert('Friends coming soon!')}
-								>👥 Friends</button
-							>
+                                                    <button
+                                                            class="button button-accent"
+                                                            on:click={() =>
+                                                                    authenticatedUser && authenticationToken
+                                                                            ? (showFriendsPanel = true)
+                                                                            : (loginErrorMessage = 'Login required to open friends panel.')
+                                                            }
+                                                            disabled={!authenticatedUser || !authenticationToken}
+                                                    >
+                                                            👥 Friends
+                                                    </button>
 							<button class="button button-ghost" on:click={logoutFromChronos}>Logout</button>
 						</div>
 					</div>
@@ -316,7 +343,28 @@
 							<button class="button button-ghost" on:click={expireInactiveChronosGamesAndRefreshDashboard}
 								>⏳ Expire old games</button
 							>
-						{/if}
+{/if}
+
+{#if showFriendsPanel}
+        {#if authenticatedUser && authenticationToken}
+                <FriendsPanel
+                        token={authenticationToken}
+                        currentUserId={authenticatedUser.id}
+                        on:close={() => (showFriendsPanel = false)}
+                        on:navigateToGame={handleFriendMatchNavigation}
+                        on:refreshDashboard={refreshDashboardAfterFriendAction}
+                />
+        {:else}
+                <div class="friends-overlay-message">
+                        <div class="friends-overlay-card">
+                                <p>You need to log in to manage friends.</p>
+                                <button type="button" class="button button-accent" on:click={() => (showFriendsPanel = false)}>
+                                        Close
+                                </button>
+                        </div>
+                </div>
+        {/if}
+{/if}
 					</div>
 				</div>
 			</div>
@@ -404,9 +452,32 @@
 		grid-template-columns: 1fr;
 		gap: 14px;
 	}
-	.auth-actions.stacked {
-		display: grid;
-		gap: 10px;
-		max-width: 260px;
-	}
+        .auth-actions.stacked {
+                display: grid;
+                gap: 10px;
+                max-width: 260px;
+        }
+
+        .friends-overlay-message {
+                position: fixed;
+                inset: 0;
+                background: rgba(7, 10, 18, 0.82);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+                padding: 20px;
+        }
+
+        .friends-overlay-card {
+                background: rgba(16, 20, 30, 0.92);
+                color: #f5f6f9;
+                padding: 24px;
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                text-align: center;
+                display: grid;
+                gap: 16px;
+                max-width: 340px;
+        }
 </style>
