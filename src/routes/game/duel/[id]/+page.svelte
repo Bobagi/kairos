@@ -53,8 +53,8 @@
 
         let now = Date.now();
         let duelTimerHandle: ReturnType<typeof setInterval> | null = null;
-        let duelTimeoutObservedDeadline: number | null = null;
-        let duelTimeoutHandledForDeadline = false;
+        let duelTimeoutSignature: string | null = null;
+        let duelTimeoutHandledForSignature = false;
 
         function formatRemainingTime(milliseconds: number): string {
                 const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -1195,20 +1195,24 @@ $: duelStage = currentDuelStage ?? null;
         $: duelCountdownCritical = Boolean(duelRemainingMs !== null && duelRemainingMs <= 3000);
         $: {
                 const deadline = duelDeadlineAt ?? null;
-                if (deadline !== duelTimeoutObservedDeadline) {
-                        duelTimeoutObservedDeadline = deadline;
-                        duelTimeoutHandledForDeadline = false;
+                const stageKey = currentDuelStage ?? 'NONE';
+                const nextSignature = `${stageKey}:${deadline ?? 'none'}`;
+                if (nextSignature !== duelTimeoutSignature) {
+                        duelTimeoutSignature = nextSignature;
+                        duelTimeoutHandledForSignature = false;
                 }
+
+                const deadlineReached =
+                        duelRemainingMs !== null ? duelRemainingMs <= 0 : deadline !== null && Date.now() >= deadline;
+
                 if (
                         browser &&
-                        !duelTimeoutHandledForDeadline &&
-                        deadline &&
-                        duelRemainingMs !== null &&
-                        duelRemainingMs <= 0 &&
+                        !duelTimeoutHandledForSignature &&
+                        deadlineReached &&
                         !(duelTimerWinner ?? null) &&
                         currentGameId
                 ) {
-                        duelTimeoutHandledForDeadline = true;
+                        duelTimeoutHandledForSignature = true;
                         if (currentDuelStage === 'PICK_CARD') {
                                 const resolveForPlayerA = !currentDuelCenter?.aCardCode;
                                 const actorId = resolveForPlayerA ? playerA : playerB;

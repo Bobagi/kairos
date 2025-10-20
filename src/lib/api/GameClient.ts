@@ -20,19 +20,37 @@ const resolvedChronosBaseUrl = (() => {
         return DEFAULT_CHRONOS_BASE_URL;
 })();
 
+function shouldDeferToBrowserProxy(): boolean {
+        if (typeof window === 'undefined') return false;
+
+        const isSecureLocalhost =
+                window.location.protocol === 'https:' &&
+                (window.location.hostname === 'localhost' ||
+                        window.location.hostname === '127.0.0.1');
+
+        if (!isSecureLocalhost) return false;
+
+        if (!resolvedChronosBaseUrl) return true;
+
+        try {
+                const target = new URL(resolvedChronosBaseUrl, window.location.origin);
+                const targetIsLocalhost = target.hostname === 'localhost' || target.hostname === '127.0.0.1';
+                const targetIsInsecure = target.protocol === 'http:';
+                if (targetIsLocalhost && targetIsInsecure) {
+                        return true;
+                }
+        } catch {
+                return true;
+        }
+
+        return false;
+}
+
 function buildChronosApiUrl(path: string): string {
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
-        if (typeof window !== 'undefined') {
-                const isSecureLocalhost =
-                        window.location.protocol === 'https:' &&
-                        (window.location.hostname === 'localhost' ||
-                                window.location.hostname === '127.0.0.1');
-                const isUsingDefaultLocalBackend = resolvedChronosBaseUrl === DEFAULT_CHRONOS_BASE_URL;
-
-                if (isSecureLocalhost && isUsingDefaultLocalBackend) {
-                        return normalizedPath;
-                }
+        if (shouldDeferToBrowserProxy()) {
+                return normalizedPath;
         }
 
         if (!resolvedChronosBaseUrl) {
