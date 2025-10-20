@@ -54,6 +54,7 @@
         let turnCountdownSeconds: number | null = null;
         let showTurnTimer = false;
         let turnTimerUrgent = false;
+        let handledTurnDeadline: number | null = null;
 
         $: currentGameId = $sveltePageStore.params.id;
         $: currentDuelCenter = $gameStateStore?.duelCenter ?? null;
@@ -283,6 +284,72 @@
                         });
                 }
                 cardDetailsCacheByCode = new Map(cardDetailsCacheByCode);
+        }
+
+        function pickAutoCardFromHand(hand: string[]): string | null {
+                if (!hand.length) return null;
+                let bestCode = hand[0];
+                let bestScore = Number.NEGATIVE_INFINITY;
+                for (const code of hand) {
+                        const details = cardDetailsCacheByCode.get(code);
+                        if (!details) {
+                                if (bestScore === Number.NEGATIVE_INFINITY) bestCode = code;
+                                continue;
+                        }
+                        const score = (details.magic ?? 0) + (details.might ?? 0) + (details.fire ?? 0);
+                        if (score > bestScore) {
+                                bestScore = score;
+                                bestCode = code;
+                        }
+                }
+                return bestCode;
+        }
+
+        function pickBestAttributeForCard(cardCode: string): 'magic' | 'might' | 'fire' {
+                const details = cardDetailsCacheByCode.get(cardCode);
+                if (!details) return 'fire';
+                const candidates: Array<{ attr: 'magic' | 'might' | 'fire'; value: number }> = [
+                        { attr: 'magic', value: details.magic ?? 0 },
+                        { attr: 'might', value: details.might ?? 0 },
+                        { attr: 'fire', value: details.fire ?? 0 }
+                ];
+                candidates.sort((a, b) => b.value - a.value);
+                return candidates[0]?.attr ?? 'fire';
+        }
+
+        async function handleTurnTimeoutAutoAction() {
+                const state = $gameStateStore;
+                if (!state || isGameOver()) return;
+                const me = state.players?.[0] ?? null;
+                if (!me) return;
+                if (state.activePlayerId && state.activePlayerId !== me) return;
+
+                try {
+                        if (state.duelStage === 'PICK_CARD' && !state.duelCenter?.aCardCode) {
+                                const myHand = Array.isArray(state.hands?.[me]) ? (state.hands[me] as string[]) : [];
+                                if (!myHand.length) return;
+                                await ensureCodesCached(myHand);
+                                const autoCard = pickAutoCardFromHand(myHand);
+                                if (!autoCard) return;
+                                await chooseChronosDuelCard(currentGameId, me, autoCard);
+                                await loadGameStateOrFinalResult();
+                                return;
+                        }
+
+                        if (
+                                state.duelStage === 'PICK_ATTRIBUTE' &&
+                                state.duelCenter?.aCardCode &&
+                                !state.duelCenter?.chosenAttribute &&
+                                (state.duelCenter?.chooserId ?? me) === me
+                        ) {
+                                await ensureCodesCached([state.duelCenter.aCardCode]);
+                                const autoAttr = pickBestAttributeForCard(state.duelCenter.aCardCode);
+                                await chooseChronosDuelAttribute(currentGameId, me, autoAttr);
+                                await loadGameStateOrFinalResult();
+                        }
+                } catch (error) {
+                        console.error('Auto action failed', error);
+                }
         }
 
 	function startDrawFx(fromEl: Element | null, toEl: Element | null, copies: number): number {
@@ -1096,6 +1163,20 @@
                 turnCountdownSeconds !== null &&
                 Number.isFinite(turnCountdownSeconds);
         $: turnTimerUrgent = typeof turnCountdownSeconds === 'number' && turnCountdownSeconds <= 3;
+        $: if (
+                showTurnTimer &&
+                turnCountdownSeconds === 0 &&
+                currentTurnDeadline !== null &&
+                handledTurnDeadline !== currentTurnDeadline
+        ) {
+                handledTurnDeadline = currentTurnDeadline;
+                void handleTurnTimeoutAutoAction();
+        }
+        $: if (currentTurnDeadline === null) {
+                handledTurnDeadline = null;
+        } else if (handledTurnDeadline !== null && currentTurnDeadline !== handledTurnDeadline) {
+                handledTurnDeadline = null;
+        }
 
 	let myHandContainerElement: HTMLDivElement | null = null;
 	let myHandCardSpreadPixels: number | null = null;

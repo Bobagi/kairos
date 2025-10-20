@@ -44,6 +44,7 @@
         let surrenderError: string | null = null;
         let nowTimestamp = Date.now();
         let timerInterval: number | null = null;
+        let handledTurnDeadline: number | null = null;
         let storageListener: ((event: StorageEvent) => void) | null = null;
         let currentTurnDeadline: number | null = null;
         let turnCountdownSeconds: number | null = null;
@@ -392,6 +393,22 @@
         $: showTurnTimer =
                 !isGameOver() && turnCountdownSeconds !== null && Number.isFinite(turnCountdownSeconds);
         $: turnTimerUrgent = typeof turnCountdownSeconds === 'number' && turnCountdownSeconds <= 3;
+        $: if (
+                showTurnTimer &&
+                turnCountdownSeconds === 0 &&
+                currentTurnDeadline !== null &&
+                handledTurnDeadline !== currentTurnDeadline &&
+                !isGameOver() &&
+                isMyTurn
+        ) {
+                handledTurnDeadline = currentTurnDeadline;
+                void skipTurnClassic().catch((error) => console.error('Auto-skipping turn failed', error));
+        }
+        $: if (currentTurnDeadline === null) {
+                handledTurnDeadline = null;
+        } else if (handledTurnDeadline !== null && currentTurnDeadline !== handledTurnDeadline) {
+                handledTurnDeadline = null;
+        }
 </script>
 
 <div class="fixed-top-bar">
