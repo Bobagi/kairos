@@ -109,7 +109,7 @@
                         clearTimeout(ephemeralNoticeTimer);
                         ephemeralNoticeTimer = null;
                 }
-        }
+        });
 
         async function loadInitialData() {
                 if (!token) return;
@@ -126,8 +126,10 @@
                 } catch (error) {
                         console.error('Failed to load friends data', error);
                         const notice = interpretFriendServiceError(error, 'Unable to load friend data.');
-                        loadError = notice.text;
-                        if (notice.tone !== 'error') {
+                        if (notice.tone === 'error') {
+                                loadError = notice.text;
+                        } else {
+                                loadError = null;
                                 persistentNotice = notice;
                         }
                 }

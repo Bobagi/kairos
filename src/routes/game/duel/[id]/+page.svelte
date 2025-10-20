@@ -1237,7 +1237,9 @@ $: duelStage = currentDuelStage ?? null;
                                         }
                                 }
 
-                                if (!center.bCardCode) {
+                                const botControlsOpponent =
+                                        !center.bCardCode && isBotIdentity(playerB, playerBUsername);
+                                if (botControlsOpponent) {
                                         const autoCard = pickFallbackCardFromHand(hands[playerB] as string[] | undefined);
                                         if (autoCard) {
                                                 pendingSelections.push(
@@ -1255,15 +1257,32 @@ $: duelStage = currentDuelStage ?? null;
                                 return true;
                         };
 
-                        if (stageHint === 'PICK_CARD' || state?.duelStage === 'PICK_CARD') {
-                                await resolveAutoCards();
-                        }
+                        const cardsResolved =
+                                stageHint === 'PICK_CARD' || state?.duelStage === 'PICK_CARD'
+                                        ? await resolveAutoCards()
+                                        : false;
 
                         state = $gameStateStore ?? state;
                         if (!state) return;
 
-                        if (state.duelStage === 'PICK_ATTRIBUTE') {
-                                const chooser = state.duelCenter?.chooserId ?? playerA;
+                        const centerAfter = state.duelCenter ?? null;
+                        const readyForAttribute = Boolean(
+                                centerAfter?.aCardCode &&
+                                        centerAfter?.bCardCode &&
+                                        !centerAfter?.chosenAttribute
+                        );
+                        const chooser = centerAfter?.chooserId ?? playerA;
+                        const chooserIsLocal = chooser === playerA;
+                        const chooserIsBot = isBotIdentity(
+                                chooser,
+                                chooser === playerA ? playerAUsername : playerBUsername
+                        );
+
+                        if (
+                                readyForAttribute &&
+                                (state.duelStage === 'PICK_ATTRIBUTE' || cardsResolved) &&
+                                (chooserIsLocal || chooserIsBot)
+                        ) {
                                 const attribute = resolvePreferredAttributeForChooser(chooser);
                                 try {
                                         await chooseChronosDuelAttribute(currentGameId, chooser, attribute);
