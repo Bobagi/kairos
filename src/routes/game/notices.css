@@ -99,19 +99,20 @@
 }
 
 .notice.chooser .btn {
-	width: clamp(52px, 6vw, 80px);
-	height: clamp(52px, 6vw, 80px);
-	padding: 0;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	border-radius: 10px;
-	border: 1px solid rgba(255, 255, 255, 0.25);
-	background: rgba(255, 255, 255, 0.08);
-	transition:
-		transform 0.08s ease,
-		background 0.2s ease,
-		border-color 0.2s ease;
+        width: clamp(52px, 6vw, 80px);
+        height: clamp(52px, 6vw, 80px);
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.08);
+        cursor: pointer;
+        transition:
+                transform 0.08s ease,
+                background 0.2s ease,
+                border-color 0.2s ease;
 }
 
 .notice.chooser .btn img {

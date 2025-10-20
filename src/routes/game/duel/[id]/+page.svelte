@@ -55,6 +55,7 @@
         let duelTimerHandle: ReturnType<typeof setInterval> | null = null;
         let duelTimeoutSignature: string | null = null;
         let duelTimeoutHandledForSignature = false;
+        let duelTimeoutResolver: Promise<void> | null = null;
 
         function formatRemainingTime(milliseconds: number): string {
                 const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -1193,6 +1194,88 @@ $: duelStage = currentDuelStage ?? null;
         })();
         $: showDuelCountdown = Boolean(duelCountdownText && duelTimerLabel);
         $: duelCountdownCritical = Boolean(duelRemainingMs !== null && duelRemainingMs <= 3000);
+        async function autoResolveExpiredDuelTurn(stageHint: GameState['duelStage'] | null) {
+                if (!currentGameId || duelTimeoutResolver) return;
+
+                const enqueue = (work: () => Promise<void>) => {
+                        duelTimeoutResolver = work().finally(() => {
+                                duelTimeoutResolver = null;
+                        });
+                };
+
+                enqueue(async () => {
+                        const ensureLatestState = async () => {
+                                if ($gameStateStore) return $gameStateStore;
+                                await loadGameStateOrFinalResult();
+                                return $gameStateStore;
+                        };
+
+                        let state = await ensureLatestState();
+                        if (!state) return;
+
+                        const pickFallbackCardFromHand = (hand: string[] | undefined | null) => {
+                                if (!hand || hand.length === 0) return null;
+                                return hand[0] ?? null;
+                        };
+
+                        const resolveAutoCards = async () => {
+                                const center = state?.duelCenter ?? null;
+                                if (!center) return false;
+
+                                const hands = state.hands ?? {};
+
+                                const pendingSelections: Array<Promise<void>> = [];
+
+                                if (!center.aCardCode) {
+                                        const autoCard = pickFallbackCardFromHand(hands[playerA] as string[] | undefined);
+                                        if (autoCard) {
+                                                pendingSelections.push(
+                                                        chooseChronosDuelCard(currentGameId, playerA, autoCard).catch((error) => {
+                                                                console.error('Failed to auto-pick card for playerA after timeout', error);
+                                                        })
+                                                );
+                                        }
+                                }
+
+                                if (!center.bCardCode) {
+                                        const autoCard = pickFallbackCardFromHand(hands[playerB] as string[] | undefined);
+                                        if (autoCard) {
+                                                pendingSelections.push(
+                                                        chooseChronosDuelCard(currentGameId, playerB, autoCard).catch((error) => {
+                                                                console.error('Failed to auto-pick card for playerB after timeout', error);
+                                                        })
+                                                );
+                                        }
+                                }
+
+                                if (!pendingSelections.length) return false;
+                                await Promise.all(pendingSelections);
+                                await loadGameStateOrFinalResult();
+                                state = $gameStateStore ?? state;
+                                return true;
+                        };
+
+                        if (stageHint === 'PICK_CARD' || state?.duelStage === 'PICK_CARD') {
+                                await resolveAutoCards();
+                        }
+
+                        state = $gameStateStore ?? state;
+                        if (!state) return;
+
+                        if (state.duelStage === 'PICK_ATTRIBUTE') {
+                                const chooser = state.duelCenter?.chooserId ?? playerA;
+                                const attribute = resolvePreferredAttributeForChooser(chooser);
+                                try {
+                                        await chooseChronosDuelAttribute(currentGameId, chooser, attribute);
+                                } catch (error) {
+                                        console.error('Failed to auto-select duel attribute after timeout', error);
+                                        return;
+                                }
+                                await loadGameStateOrFinalResult();
+                        }
+                });
+        }
+
         $: {
                 const deadline = duelDeadlineAt ?? null;
                 const stageKey = currentDuelStage ?? 'NONE';
@@ -1213,29 +1296,7 @@ $: duelStage = currentDuelStage ?? null;
                         currentGameId
                 ) {
                         duelTimeoutHandledForSignature = true;
-                        if (currentDuelStage === 'PICK_CARD') {
-                                const resolveForPlayerA = !currentDuelCenter?.aCardCode;
-                                const actorId = resolveForPlayerA ? playerA : playerB;
-                                const hand = resolveForPlayerA
-                                        ? ($gameStateStore?.hands?.[playerA] as string[] | undefined)
-                                        : ($gameStateStore?.hands?.[playerB] as string[] | undefined);
-                                const fallbackCardCode = Array.isArray(hand) && hand.length > 0 ? hand[0] : '';
-                                if (fallbackCardCode) {
-                                        void chooseChronosDuelCard(currentGameId, actorId, fallbackCardCode)
-                                                .then(() => loadGameStateOrFinalResult())
-                                                .catch((error) =>
-                                                        console.error('Failed to auto-resolve duel card timeout', error)
-                                                );
-                                }
-                        } else if (currentDuelStage === 'PICK_ATTRIBUTE') {
-                                const chooser = chooserId ?? playerA;
-                                const attribute = resolvePreferredAttributeForChooser(chooser);
-                                void chooseChronosDuelAttribute(currentGameId, chooser, attribute)
-                                        .then(() => loadGameStateOrFinalResult())
-                                        .catch((error) =>
-                                                console.error('Failed to auto-resolve duel attribute timeout', error)
-                                        );
-                        }
+                        autoResolveExpiredDuelTurn(currentDuelStage ?? null);
                 }
         }
 
