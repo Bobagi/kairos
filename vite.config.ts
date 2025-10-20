@@ -19,16 +19,21 @@ export default defineConfig(({ mode }) => {
 				cert: fs.readFileSync(path.resolve(__dirname, 'certs/localhost.pem'))
 			},
 			proxy: {
-				'/game': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
-					changeOrigin: true,
-					secure: true
-				},
-				'/auth': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
-					changeOrigin: true,
-					secure: true
-				}
+                                '/game': {
+                                        target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
+                                        changeOrigin: true,
+                                        secure: true
+                                },
+                                '/auth': {
+                                        target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
+                                        changeOrigin: true,
+                                        secure: true
+                                },
+                                '/friends': {
+                                        target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
+                                        changeOrigin: true,
+                                        secure: true
+                                }
 			}
 		},
 		test: {

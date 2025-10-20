@@ -22,6 +22,23 @@ const resolvedChronosBaseUrl = (() => {
 
 function buildChronosApiUrl(path: string): string {
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+        if (typeof window !== 'undefined') {
+                const isSecureLocalhost =
+                        window.location.protocol === 'https:' &&
+                        (window.location.hostname === 'localhost' ||
+                                window.location.hostname === '127.0.0.1');
+                const isUsingDefaultLocalBackend = resolvedChronosBaseUrl === DEFAULT_CHRONOS_BASE_URL;
+
+                if (isSecureLocalhost && isUsingDefaultLocalBackend) {
+                        return normalizedPath;
+                }
+        }
+
+        if (!resolvedChronosBaseUrl) {
+                return normalizedPath;
+        }
+
         return `${resolvedChronosBaseUrl}${normalizedPath}`;
 }
 
