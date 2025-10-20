@@ -45,6 +45,8 @@
 
         let now = Date.now();
         let turnTimerHandle: ReturnType<typeof setInterval> | null = null;
+        let lastObservedTurnDeadline: number | null = null;
+        let autoTimeoutHandledForCurrentDeadline = false;
 
         function formatRemainingTime(milliseconds: number): string {
                 const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -390,6 +392,32 @@
                 Boolean(formattedTurnCountdown && !$gameStateStore?.winner && currentTurnDeadline);
         $: isCountdownCritical = Boolean(remainingTurnMs !== null && remainingTurnMs <= 3000);
         $: turnCountdownLabel = isMyTurn ? 'Your turn' : 'Opponent turn';
+        $: {
+                const deadline = currentTurnDeadline ?? null;
+                if (deadline !== lastObservedTurnDeadline) {
+                        lastObservedTurnDeadline = deadline;
+                        autoTimeoutHandledForCurrentDeadline = false;
+                }
+                if (
+                        browser &&
+                        !autoTimeoutHandledForCurrentDeadline &&
+                        deadline &&
+                        remainingTurnMs !== null &&
+                        remainingTurnMs <= 0 &&
+                        isMyTurn &&
+                        !isGameOver() &&
+                        $gameStateStore &&
+                        currentGameId
+                ) {
+                        autoTimeoutHandledForCurrentDeadline = true;
+                        const me = $gameStateStore.players?.[0] ?? 'playerA';
+                        void skipChronosGameTurn(currentGameId, me)
+                                .then(() => loadGameStateOrFinalResult())
+                                .catch((error) =>
+                                        console.error('Failed to auto-resolve classic turn timeout', error)
+                                );
+                }
+        }
 </script>
 
 <div class="fixed-top-bar">

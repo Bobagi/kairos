@@ -8,24 +8,9 @@ interface KairosRuntimeEnvironmentVariables extends ImportMetaEnv {
 const runtimeEnvironmentVariables = import.meta.env as KairosRuntimeEnvironmentVariables;
 const configuredChronosBaseUrl = runtimeEnvironmentVariables.VITE_API_BASE_URL;
 
-const sanitizedConfiguredChronosBaseUrl = typeof configuredChronosBaseUrl === 'string'
+const resolvedChronosBaseUrl = typeof configuredChronosBaseUrl === 'string'
         ? configuredChronosBaseUrl.trim().replace(/\/+$/, '')
         : '';
-
-let resolvedChronosBaseUrl = sanitizedConfiguredChronosBaseUrl;
-
-if (typeof window !== 'undefined') {
-        const isHttpsPage = window.location.protocol === 'https:';
-        const isLocalPage =
-                window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const isConfiguredLocalHttpTarget =
-                sanitizedConfiguredChronosBaseUrl.startsWith('http://localhost') ||
-                sanitizedConfiguredChronosBaseUrl.startsWith('http://127.0.0.1');
-
-        if (isHttpsPage && isLocalPage && isConfiguredLocalHttpTarget) {
-                resolvedChronosBaseUrl = '';
-        }
-}
 
 function buildChronosApiUrl(path: string): string {
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;

@@ -53,6 +53,8 @@
 
         let now = Date.now();
         let duelTimerHandle: ReturnType<typeof setInterval> | null = null;
+        let duelTimeoutObservedDeadline: number | null = null;
+        let duelTimeoutHandledForDeadline = false;
 
         function formatRemainingTime(milliseconds: number): string {
                 const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
@@ -1137,6 +1139,44 @@
         })();
         $: showDuelCountdown = Boolean(duelCountdownText && duelTimerLabel);
         $: duelCountdownCritical = Boolean(duelRemainingMs !== null && duelRemainingMs <= 3000);
+        $: {
+                const deadline = duelDeadlineAt ?? null;
+                if (deadline !== duelTimeoutObservedDeadline) {
+                        duelTimeoutObservedDeadline = deadline;
+                        duelTimeoutHandledForDeadline = false;
+                }
+                if (
+                        browser &&
+                        !duelTimeoutHandledForDeadline &&
+                        deadline &&
+                        duelRemainingMs !== null &&
+                        duelRemainingMs <= 0 &&
+                        !(duelTimerWinner ?? null) &&
+                        currentGameId
+                ) {
+                        duelTimeoutHandledForDeadline = true;
+                        if (currentDuelStage === 'PICK_CARD') {
+                                const resolveForPlayerA = !currentDuelCenter?.aCardCode;
+                                const actorId = resolveForPlayerA ? playerA : playerB;
+                                const hand = resolveForPlayerA
+                                        ? ($gameStateStore?.hands?.[playerA] as string[] | undefined)
+                                        : ($gameStateStore?.hands?.[playerB] as string[] | undefined);
+                                const fallbackCardCode = Array.isArray(hand) && hand.length > 0 ? hand[0] : '';
+                                void chooseChronosDuelCard(currentGameId, actorId, fallbackCardCode)
+                                        .then(() => loadGameStateOrFinalResult())
+                                        .catch((error) =>
+                                                console.error('Failed to auto-resolve duel card timeout', error)
+                                        );
+                        } else if (currentDuelStage === 'PICK_ATTRIBUTE') {
+                                const chooser = chooserId ?? playerA;
+                                void chooseChronosDuelAttribute(currentGameId, chooser, 'magic')
+                                        .then(() => loadGameStateOrFinalResult())
+                                        .catch((error) =>
+                                                console.error('Failed to auto-resolve duel attribute timeout', error)
+                                        );
+                        }
+                }
+        }
 
         $: chooserCardDetails =
                 duelStage === 'PICK_ATTRIBUTE' &&
