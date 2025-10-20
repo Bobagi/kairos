@@ -4,33 +4,43 @@ import fs from 'fs';
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 
+const DEFAULT_CHRONOS_BASE_URL = 'http://localhost:3053';
+
 export default defineConfig(({ mode }) => {
-	const env = loadEnv(mode, process.cwd(), '');
+        const env = loadEnv(mode, process.cwd(), '');
 
-	console.log('Loaded VITE_API_BASE_URL:', env.VITE_API_BASE_URL);
+        console.log('Loaded VITE_API_BASE_URL:', env.VITE_API_BASE_URL);
 
-	return {
-		plugins: [tailwindcss(), sveltekit()],
-		server: {
+        const chronosTarget = (env.VITE_API_BASE_URL?.trim() || DEFAULT_CHRONOS_BASE_URL).replace(/\/+$/, '');
+        const proxySecure = chronosTarget.startsWith('https://');
+
+        return {
+                plugins: [tailwindcss(), sveltekit()],
+                server: {
 			host: '0.0.0.0',
 			port: 3055,
 			https: {
 				key: fs.readFileSync(path.resolve(__dirname, 'certs/localhost-key.pem')),
 				cert: fs.readFileSync(path.resolve(__dirname, 'certs/localhost.pem'))
 			},
-			proxy: {
-				'/game': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
-					changeOrigin: true,
-					secure: true
-				},
-				'/auth': {
-					target: env.VITE_API_BASE_URL || 'https://chronos.bobagi.space',
-					changeOrigin: true,
-					secure: true
-				}
-			}
-		},
+                        proxy: {
+                                '/game': {
+                                        target: chronosTarget,
+                                        changeOrigin: true,
+                                        secure: proxySecure
+                                },
+                                '/auth': {
+                                        target: chronosTarget,
+                                        changeOrigin: true,
+                                        secure: proxySecure
+                                },
+                                '/friends': {
+                                        target: chronosTarget,
+                                        changeOrigin: true,
+                                        secure: proxySecure
+                                }
+                        }
+                },
 		test: {
 			projects: [
 				{

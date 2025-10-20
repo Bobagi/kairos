@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { page as sveltePageStore } from '$app/stores';
+        import { browser } from '$app/environment';
+        import { page as sveltePageStore } from '$app/stores';
         import {
                 fetchChronosGameResult,
                 fetchChronosGameStateById,
                 fetchMultipleChronosCardMetadata,
                 playCardInChronosGame,
-                skipChronosGameTurn
+                skipChronosGameTurn,
+                surrenderChronosGame
         } from '$lib/api/GameClient';
 	import CardComposite from '$lib/components/CardComposite.svelte';
 	import CenterPanel from '$lib/components/CenterPanel.svelte';
@@ -13,7 +15,7 @@
 	import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
 	import { fx as visualEffectsStore } from '$lib/stores/fx';
 	import { game as gameStateStore, type GameState } from '$lib/stores/game';
-	import { onMount } from 'svelte';
+        import { onDestroy, onMount } from 'svelte';
 	import '../../game.css';
 
 	export const DRAW_TRAVEL_MS = 420;
@@ -34,11 +36,24 @@
 	const titleOverlayImageUrl = '/frames/title.png';
 	const cardBackImageUrl = '/frames/card-back.png';
 
-	let errorMessageText: string | null = null;
-	let finalGameResult: { winner: string | null; log: string[] } | null = null;
+        let errorMessageText: string | null = null;
+        let authenticationToken: string | null = null;
+        let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
-	$: currentGameId = $sveltePageStore.params.id;
-	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+        $: currentGameId = $sveltePageStore.params.id;
+        const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+
+        let now = Date.now();
+        let turnTimerHandle: ReturnType<typeof setInterval> | null = null;
+        let lastObservedTurnDeadline: number | null = null;
+        let autoTimeoutHandledForCurrentDeadline = false;
+
+        function formatRemainingTime(milliseconds: number): string {
+                const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
 
 	type HandCardItem = {
 		code: string;
@@ -285,18 +300,46 @@
             );
 	}
 
-	async function skipTurnClassic() {
-		if (isGameOver()) return;
-		const me = $gameStateStore?.players?.[0] ?? 'playerA';
+        async function skipTurnClassic() {
+                if (isGameOver()) return;
+                const me = $gameStateStore?.players?.[0] ?? 'playerA';
             await skipChronosGameTurn(currentGameId, me);
-		await loadGameStateOrFinalResult();
-	}
+                await loadGameStateOrFinalResult();
+        }
 
-	onMount(async () => {
-		await fetchTemplate();
-		await loadGameStateOrFinalResult();
-		setupMyHandResizeObserver();
-	});
+        async function surrenderClassicGame() {
+                if (isGameOver()) return;
+                if (!authenticationToken) {
+                        errorMessageText = 'Login required to surrender.';
+                        return;
+                }
+                try {
+                        await surrenderChronosGame(currentGameId, authenticationToken);
+                        await loadGameStateOrFinalResult();
+                } catch (error) {
+                        console.error('Failed to surrender classic game', error);
+                        errorMessageText = 'Unable to surrender match.';
+                }
+        }
+
+        onMount(async () => {
+                if (browser) {
+                        authenticationToken = localStorage.getItem('token');
+                        turnTimerHandle = window.setInterval(() => {
+                                now = Date.now();
+                        }, 250);
+                }
+                await fetchTemplate();
+                await loadGameStateOrFinalResult();
+                setupMyHandResizeObserver();
+        });
+
+        onDestroy(() => {
+                if (turnTimerHandle) {
+                        window.clearInterval(turnTimerHandle);
+                        turnTimerHandle = null;
+                }
+        });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
@@ -335,14 +378,126 @@
 	$: oppDeckEmpty = deckB === 0;
 	$: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
 	$: isMyTurn = ($gameStateStore?.players?.[currentTurnIndex] ?? playerA) === playerA;
-	$: showLocalSkip =
-		!isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: showLocalSkip =
+                !isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: currentTurnDeadline =
+                typeof $gameStateStore?.turnDeadline === 'number'
+                        ? $gameStateStore.turnDeadline
+                        : null;
+        $: remainingTurnMs =
+                !$gameStateStore?.winner && currentTurnDeadline ? Math.max(0, currentTurnDeadline - now) : null;
+        $: formattedTurnCountdown =
+                remainingTurnMs !== null ? formatRemainingTime(remainingTurnMs) : null;
+        $: showTurnCountdown =
+                Boolean(formattedTurnCountdown && !$gameStateStore?.winner && currentTurnDeadline);
+        $: isCountdownCritical = Boolean(remainingTurnMs !== null && remainingTurnMs <= 3000);
+        $: turnCountdownLabel = isMyTurn ? 'Your turn' : 'Opponent turn';
+        $: {
+                const deadline = currentTurnDeadline ?? null;
+                if (deadline !== lastObservedTurnDeadline) {
+                        lastObservedTurnDeadline = deadline;
+                        autoTimeoutHandledForCurrentDeadline = false;
+                }
+                if (
+                        browser &&
+                        !autoTimeoutHandledForCurrentDeadline &&
+                        deadline &&
+                        remainingTurnMs !== null &&
+                        remainingTurnMs <= 0 &&
+                        isMyTurn &&
+                        !isGameOver() &&
+                        $gameStateStore &&
+                        currentGameId
+                ) {
+                        autoTimeoutHandledForCurrentDeadline = true;
+                        const me = $gameStateStore.players?.[0] ?? 'playerA';
+                        void skipChronosGameTurn(currentGameId, me)
+                                .then(() => loadGameStateOrFinalResult())
+                                .catch((error) =>
+                                        console.error('Failed to auto-resolve classic turn timeout', error)
+                                );
+                }
+        }
 </script>
 
 <div class="fixed-top-bar">
-	<a href="/" class="home-btn">← Home</a>
-	<div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
+        <a href="/" class="home-btn">← Home</a>
+        <div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
 </div>
+
+{#if showTurnCountdown}
+        <div class={`turn-timer ${isCountdownCritical ? 'critical' : ''}`}>
+                <span class="label">{turnCountdownLabel}</span>
+                <span class="time">{formattedTurnCountdown}</span>
+        </div>
+{/if}
+
+<style>
+        .turn-timer {
+                margin: 12px auto;
+                padding: 8px 16px;
+                max-width: 220px;
+                border-radius: 999px;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(148, 163, 184, 0.45);
+                color: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                font-size: 0.95rem;
+        }
+
+        .turn-timer.critical {
+                border-color: rgba(248, 113, 113, 0.85);
+                background: rgba(185, 28, 28, 0.35);
+                color: #fee2e2;
+        }
+
+        .turn-timer .label {
+                letter-spacing: 0.02em;
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                color: rgba(226, 232, 240, 0.85);
+        }
+
+        .turn-timer.critical .label {
+                color: rgba(254, 226, 226, 0.9);
+        }
+
+        .turn-timer .time {
+                font-variant-numeric: tabular-nums;
+                font-weight: 600;
+        }
+
+        .surrender-row {
+                margin: 12px auto;
+                max-width: 320px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 12px;
+        }
+
+        .surrender-button {
+                padding: 8px 18px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                background: rgba(220, 76, 100, 0.25);
+                color: #ffe2e8;
+                cursor: pointer;
+        }
+
+        .surrender-button:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+        }
+
+        .surrender-hint {
+                font-size: 0.85rem;
+                color: rgba(255, 237, 240, 0.75);
+        }
+</style>
 
 <div class="board" style="padding-top:50px;">
 	<section class="zone opponent">
@@ -397,12 +552,28 @@
 		log={$gameStateStore?.log}
 		onRefresh={loadGameStateOrFinalResult}
 		onSkipTurn={skipTurnClassic}
-	/>
+        />
 
-	{#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
-		<div class="notice success" style="margin-top:12px; text-align:center;">
-			Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
-		</div>
+        {#if !($gameStateStore?.winner ?? finalGameResult?.winner ?? null)}
+                <div class="surrender-row">
+                        <button
+                                type="button"
+                                class="surrender-button"
+                                on:click={surrenderClassicGame}
+                                disabled={!authenticationToken}
+                        >
+                                🏳️ Surrender
+                        </button>
+                        {#if !authenticationToken}
+                                <span class="surrender-hint">Login required to surrender.</span>
+                        {/if}
+                </div>
+        {/if}
+
+        {#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
+                <div class="notice success" style="margin-top:12px; text-align:center;">
+                        Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
+                </div>
 		<div style="margin-top:8px;text-align:center;">
 			<a href="/" class="btn" style="text-decoration:none;">Back to home</a>
 		</div>
