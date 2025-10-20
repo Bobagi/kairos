@@ -632,7 +632,10 @@ export async function listChronosFriendRequests(token: string): Promise<ChronosF
 export async function sendChronosFriendRequest(targetId: string, token: string): Promise<unknown> {
         return performChronosApiRequestReturningJson(
                 '/friends/request',
-                { method: 'POST', body: JSON.stringify({ targetId }) },
+                {
+                        method: 'POST',
+                        body: JSON.stringify({ targetId, friendId: targetId })
+                },
                 token
         );
 }

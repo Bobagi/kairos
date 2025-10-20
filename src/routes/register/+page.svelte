@@ -32,8 +32,20 @@
                                 usernameInputValue.trim(),
                                 passwordInputValue
                         );
-                        if (browser) localStorage.setItem('token', registrationResponse.accessToken);
-                        await fetchAuthenticatedChronosUserProfile(registrationResponse.accessToken).catch(() => {});
+                        const accessToken = registrationResponse.accessToken;
+                        if (browser) {
+                                localStorage.setItem('token', accessToken);
+                                try {
+                                        const profile = await fetchAuthenticatedChronosUserProfile(accessToken);
+                                        localStorage.setItem('userId', profile.id);
+                                        localStorage.setItem('username', profile.username);
+                                } catch {
+                                        localStorage.removeItem('userId');
+                                        localStorage.removeItem('username');
+                                }
+                        } else {
+                                await fetchAuthenticatedChronosUserProfile(accessToken).catch(() => {});
+                        }
                         goto('/');
                 } catch (error) {
                         console.error(error);

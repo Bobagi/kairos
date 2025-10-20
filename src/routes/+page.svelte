@@ -111,6 +111,17 @@
                 }
         }
 
+        function persistAuthenticatedUser(user: AuthenticatedChronosUser | null) {
+                if (!browser) return;
+                if (user) {
+                        localStorage.setItem('userId', user.id);
+                        localStorage.setItem('username', user.username);
+                } else {
+                        localStorage.removeItem('userId');
+                        localStorage.removeItem('username');
+                }
+        }
+
         onMount(async () => {
                 if (browser) authenticationToken = localStorage.getItem('token');
                 if (authenticationToken) {
@@ -118,9 +129,13 @@
                                 authenticatedUser = await fetchAuthenticatedChronosUserProfile(
                                         authenticationToken
                                 );
+                                persistAuthenticatedUser(authenticatedUser);
                         } catch {
                                 authenticationToken = null;
-                                if (browser) localStorage.removeItem('token');
+                                if (browser) {
+                                        localStorage.removeItem('token');
+                                        persistAuthenticatedUser(null);
+                                }
                         }
                 }
                 await loadChronosDashboardData();
@@ -136,7 +151,10 @@
                         authenticationToken = authenticationResponse.accessToken;
                         authenticatedUser = authenticationResponse.user;
                         passwordInputValue = '';
-                        if (browser && authenticationToken) localStorage.setItem('token', authenticationToken);
+                        if (browser && authenticationToken) {
+                                localStorage.setItem('token', authenticationToken);
+                                persistAuthenticatedUser(authenticatedUser);
+                        }
                         await loadChronosDashboardData();
                 } catch (error) {
                         console.error('Login failed', error);
@@ -147,7 +165,10 @@
         function logoutFromChronos() {
                 authenticationToken = null;
                 authenticatedUser = null;
-                if (browser) localStorage.removeItem('token');
+                if (browser) {
+                        localStorage.removeItem('token');
+                        persistAuthenticatedUser(null);
+                }
                 allActiveChronosGames = [];
                 myActiveChronosGames = [];
                 statGamesPlayed = 0;

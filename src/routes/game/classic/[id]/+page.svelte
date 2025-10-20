@@ -40,6 +40,8 @@
         let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
         let authToken: string | null = null;
+        let authenticatedPlayerId: string | null = null;
+        let authenticatedUsername: string | null = null;
         let surrendering = false;
         let surrenderError: string | null = null;
         let nowTimestamp = Date.now();
@@ -76,8 +78,46 @@
 
         let hasInitialStateLoaded = false;
         let previousOppHandCount: number | null = null;
+        let previousOpponentId: string | null = null;
+        let myPlayerId: string | null = null;
+        let opponentPlayerId: string | null = null;
+        let playerAId: string | null = null;
+        let playerBId: string | null = null;
+        let playerALabel = 'playerA';
+        let playerBLabel = 'playerB';
+        let winnerLabel: string | null = null;
+        let activePlayerId: string | null = null;
 
         const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+        function matchPlayerIdByUsername(state: GameState | null, username: string | null): string | null {
+                if (!state || !username || !state.playerUsernames) return null;
+                for (const [id, name] of Object.entries(state.playerUsernames)) {
+                        if (name === username) return id;
+                }
+                return null;
+        }
+
+        function resolveMyPlayerId(state: GameState | null): string | null {
+                if (!state) return null;
+                if (authenticatedPlayerId && state.players?.includes(authenticatedPlayerId)) {
+                        return authenticatedPlayerId;
+                }
+                const matchedByUsername = matchPlayerIdByUsername(state, authenticatedUsername);
+                if (matchedByUsername) return matchedByUsername;
+                if (state.players && state.players.length) return state.players[0];
+                return null;
+        }
+
+        function resolveOpponentPlayerId(state: GameState | null, me: string | null): string | null {
+                if (!state || !state.players?.length) return null;
+                if (me) {
+                        const other = state.players.find((id) => id !== me);
+                        if (other) return other;
+                }
+                if (state.players.length >= 2) return state.players[1];
+                return state.players[0];
+        }
 
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
 		const buckets = new Map<string, HandCardItem[]>();
@@ -197,19 +237,22 @@
 				finalGameResult = null;
 				gameStateStore.set({ ...state, gameId: currentGameId });
 
-				const me = state.players[0];
-				const opp = state.players[1] ?? 'playerB';
+                                const myId = resolveMyPlayerId(state);
+                                const oppId = resolveOpponentPlayerId(state, myId);
 
-				const myCodes = Array.isArray(state.hands?.[me]) ? (state.hands[me] as string[]) : [];
-				const { items, created } = reconcile(playerHandCardItems, myCodes);
-				playerHandCardItems = items;
+                                const myCodes =
+                                        myId && Array.isArray(state.hands?.[myId])
+                                                ? (state.hands[myId] as string[])
+                                                : [];
+                                const { items, created } = reconcile(playerHandCardItems, myCodes);
+                                playerHandCardItems = items;
 
-				if (myCodes.length) await ensureCodesCached(myCodes);
-				playerHandCardItems = playerHandCardItems.map((it) => {
-					const d = cardDetailsCacheByCode.get(it.code);
-					return d
-						? {
-								...it,
+                                if (myCodes.length) await ensureCodesCached(myCodes);
+                                playerHandCardItems = playerHandCardItems.map((it) => {
+                                        const d = cardDetailsCacheByCode.get(it.code);
+                                        return d
+                                                ? {
+                                                                ...it,
 								name: d.name,
 								description: d.description,
 								imageUrl: d.imageUrl,
@@ -217,34 +260,42 @@
 								fire: d.fire,
 								magic: d.magic
 							}
-						: it;
-				});
+                                                : it;
+                                });
 
-				const newOppCount = Array.isArray(state.hands?.[opp]) ? state.hands[opp].length : 0;
+                                const newOppCount =
+                                        oppId && Array.isArray(state.hands?.[oppId])
+                                                ? state.hands[oppId].length
+                                                : 0;
 
-				if (hasInitialStateLoaded) {
-					if (created.length) {
-						hideUids(created);
-						const totalMs = startDrawFx(
-							playerDeckAnchorElement,
-							myHandContainerElement,
-							created.length
-						);
-						window.setTimeout(() => {
-							unhideUids(created);
-							addPendingFlipsFor(created);
-						}, totalMs);
-					}
-					if (previousOppHandCount !== null && newOppCount > previousOppHandCount) {
-						startDrawFx(
-							opponentDeckAnchorElement,
-							opponentHandContainerElement,
-							newOppCount - previousOppHandCount
-						);
-					}
-				}
+                                if (oppId !== previousOpponentId) {
+                                        previousOppHandCount = null;
+                                        previousOpponentId = oppId;
+                                }
 
-				previousOppHandCount = newOppCount;
+                                if (hasInitialStateLoaded) {
+                                        if (created.length) {
+                                                hideUids(created);
+                                                const totalMs = startDrawFx(
+                                                        playerDeckAnchorElement,
+                                                        myHandContainerElement,
+                                                        created.length
+                                                );
+                                                window.setTimeout(() => {
+                                                        unhideUids(created);
+                                                        addPendingFlipsFor(created);
+                                                }, totalMs);
+                                        }
+                                        if (previousOppHandCount !== null && newOppCount > previousOppHandCount) {
+                                                startDrawFx(
+                                                        opponentDeckAnchorElement,
+                                                        opponentHandContainerElement,
+                                                        newOppCount - previousOppHandCount
+                                                );
+                                        }
+                                }
+
+                                previousOppHandCount = newOppCount;
 				hasInitialStateLoaded = true;
 
 				return;
@@ -278,12 +329,12 @@
 	}
 	const artFor = (code: string) => cardDetailsCacheByCode.get(code)?.imageUrl;
 
-	function playWithFX(e: MouseEvent, code: string) {
-		if (isGameOver()) return;
-		const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		const { kind, amount, target } = effectFor(code);
-		const targetEl = target === 'opp' ? opponentHpPillElement : myHpPillElement;
-		if (targetEl) {
+        function playWithFX(e: MouseEvent, code: string) {
+                if (isGameOver()) return;
+                const fromRect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const { kind, amount, target } = effectFor(code);
+                const targetEl = target === 'opp' ? opponentHpPillElement : myHpPillElement;
+                if (targetEl) {
 			const targetRect = targetEl.getBoundingClientRect();
 			visualEffectsStore.start({
 				fromRect,
@@ -291,17 +342,17 @@
 				imgUrl: artFor(code) ?? '',
 				frameUrl: frameOverlayImageUrl,
 				kind,
-				amount
-			});
-		}
-            playCardInChronosGame(currentGameId, $gameStateStore!.players[0], code).then(
-                    loadGameStateOrFinalResult
-            );
-	}
+                                amount
+                        });
+                }
+                const me = myPlayerId ?? resolveMyPlayerId($gameStateStore);
+                if (!me) return;
+                playCardInChronosGame(currentGameId, me, code).then(loadGameStateOrFinalResult);
+        }
 
         async function skipTurnClassic() {
                 if (isGameOver()) return;
-                const me = $gameStateStore?.players?.[0] ?? 'playerA';
+                const me = myPlayerId ?? resolveMyPlayerId($gameStateStore) ?? 'playerA';
                 await skipChronosGameTurn(currentGameId, me);
                 await loadGameStateOrFinalResult();
         }
@@ -327,8 +378,12 @@
         onMount(async () => {
                 if (browser) {
                         authToken = localStorage.getItem('token');
+                        authenticatedPlayerId = localStorage.getItem('userId');
+                        authenticatedUsername = localStorage.getItem('username');
                         storageListener = (event: StorageEvent) => {
                                 if (event.key === 'token') authToken = event.newValue;
+                                if (event.key === 'userId') authenticatedPlayerId = event.newValue;
+                                if (event.key === 'username') authenticatedUsername = event.newValue;
                         };
                         window.addEventListener('storage', storageListener);
                         timerInterval = window.setInterval(() => {
@@ -345,43 +400,63 @@
                 if (browser && storageListener) window.removeEventListener('storage', storageListener);
         });
 
-	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
-	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
+        $: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
+        $: myPlayerId = resolveMyPlayerId($gameStateStore);
+        $: opponentPlayerId = resolveOpponentPlayerId($gameStateStore, myPlayerId);
+        $: playerAId = myPlayerId ?? $gameStateStore?.players?.[0] ?? null;
+        $: playerBId =
+                opponentPlayerId ??
+                resolveOpponentPlayerId($gameStateStore, playerAId) ??
+                null;
+        $: playerALabel = playerAId
+                ? $gameStateStore?.playerUsernames?.[playerAId] ?? playerAId
+                : 'playerA';
+        $: playerBLabel = playerBId
+                ? $gameStateStore?.playerUsernames?.[playerBId] ?? playerBId
+                : 'playerB';
 
-	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
-	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
+        $: hpA = playerAId ? $gameStateStore?.hp?.[playerAId] ?? 0 : 0;
+        $: hpB = playerBId ? $gameStateStore?.hp?.[playerBId] ?? 0 : 0;
 
-	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
-		? $gameStateStore!.decks[playerA].length
-		: 0;
-	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
-		? $gameStateStore!.decks[playerB].length
-		: 0;
+        $: deckA =
+                playerAId && Array.isArray($gameStateStore?.decks?.[playerAId])
+                        ? $gameStateStore!.decks[playerAId].length
+                        : 0;
+        $: deckB =
+                playerBId && Array.isArray($gameStateStore?.decks?.[playerBId])
+                        ? $gameStateStore!.decks[playerBId].length
+                        : 0;
 
-        $: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
-                ? $gameStateStore!.hands[playerB].length
-                : 0;
+        $: oppHandCount =
+                playerBId && Array.isArray($gameStateStore?.hands?.[playerBId])
+                        ? $gameStateStore!.hands[playerBId].length
+                        : 0;
 
         let myHandContainerElement: HTMLDivElement | null = null;
-	let opponentHandContainerElement: HTMLDivElement | null = null;
-	let myHandCardSpreadPixels: number | null = null;
-	function computeSpread() {
-		const count = Math.max(1, playerHandCardItems.length);
-		const w = myHandContainerElement?.clientWidth ?? 0;
-		myHandCardSpreadPixels = Math.min(46, Math.max(10, (w / count) * 0.24));
-	}
+        let opponentHandContainerElement: HTMLDivElement | null = null;
+        let myHandCardSpreadPixels: number | null = null;
+        function computeSpread() {
+                const count = Math.max(1, playerHandCardItems.length);
+                const w = myHandContainerElement?.clientWidth ?? 0;
+                myHandCardSpreadPixels = Math.min(46, Math.max(10, (w / count) * 0.24));
+        }
 	function setupMyHandResizeObserver() {
 		const ro = new ResizeObserver(() => computeSpread());
 		if (myHandContainerElement) ro.observe(myHandContainerElement);
 	}
 	$: computeSpread();
 
-	$: myHandEmpty = playerHandCardItems.length === 0;
-	$: myDeckEmpty = deckA === 0;
-	$: oppHandEmpty = oppHandCount === 0;
+        $: myHandEmpty = playerHandCardItems.length === 0;
+        $: myDeckEmpty = deckA === 0;
+        $: oppHandEmpty = oppHandCount === 0;
         $: oppDeckEmpty = deckB === 0;
-        $: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
-        $: isMyTurn = ($gameStateStore?.players?.[currentTurnIndex] ?? playerA) === playerA;
+        $: activePlayerId = $gameStateStore?.activePlayerId ?? null;
+        $: isMyTurn =
+                !isGameOver() &&
+                myPlayerId !== null &&
+                (activePlayerId
+                        ? activePlayerId === myPlayerId
+                        : ($gameStateStore?.players?.[currentTurnIndex] ?? null) === myPlayerId);
         $: showLocalSkip =
                 !isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
         $: currentTurnDeadline =
@@ -409,6 +484,12 @@
         } else if (handledTurnDeadline !== null && currentTurnDeadline !== handledTurnDeadline) {
                 handledTurnDeadline = null;
         }
+        $: winnerLabel = (() => {
+                const rawWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
+                if (!rawWinner) return null;
+                const label = $gameStateStore?.playerUsernames?.[rawWinner] ?? rawWinner;
+                return typeof label === 'string' ? label : String(label);
+        })();
 </script>
 
 <div class="fixed-top-bar">
@@ -439,7 +520,7 @@
         {/if}
         <section class="zone opponent">
                 <div class="zone-header">
-                        <span class="pill name">👤 {playerB}</span>
+                        <span class="pill name">👤 {playerBLabel}</span>
                         <span class="pill hp" bind:this={opponentHpPillElement}>❤️ {hpB}</span>
                         <span class="pill deck">🃏 {deckB}</span>
 		</div>
@@ -476,14 +557,14 @@
 		</div>
 	</section>
 
-	<CenterPanel
-		{playerA}
-		{playerB}
-		{hpA}
-		{hpB}
-		{deckA}
-		{deckB}
-		finalResult={finalGameResult}
+        <CenterPanel
+                playerA={playerALabel}
+                playerB={playerBLabel}
+                {hpA}
+                {hpB}
+                {deckA}
+                {deckB}
+                finalResult={finalGameResult}
 		endedDueToNoCards={false}
 		errorMessage={errorMessageText}
 		log={$gameStateStore?.log}
@@ -491,9 +572,9 @@
 		onSkipTurn={skipTurnClassic}
 	/>
 
-	{#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
-		<div class="notice success" style="margin-top:12px; text-align:center;">
-			Winner: {$gameStateStore?.winner ?? finalGameResult?.winner}
+        {#if ($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null}
+                <div class="notice success" style="margin-top:12px; text-align:center;">
+                        Winner: {winnerLabel}
 		</div>
 		<div style="margin-top:8px;text-align:center;">
 			<a href="/" class="btn" style="text-decoration:none;">Back to home</a>
@@ -511,8 +592,8 @@
 	{/if}
 
 	<section class="zone player">
-		<div class="zone-header">
-			<span class="pill name">👤 {playerA}</span>
+                <div class="zone-header">
+                        <span class="pill name">👤 {playerALabel}</span>
 			<span class="pill hp" bind:this={myHpPillElement}>❤️ {hpA}</span>
 			<span class="pill deck">🃏 {deckA}</span>
 		</div>

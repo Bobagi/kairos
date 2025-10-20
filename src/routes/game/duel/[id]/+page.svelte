@@ -45,6 +45,8 @@
         let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
         let authToken: string | null = null;
+        let authenticatedPlayerId: string | null = null;
+        let authenticatedUsername: string | null = null;
         let surrendering = false;
         let surrenderError: string | null = null;
         let nowTimestamp = Date.now();
@@ -62,19 +64,48 @@
         $: currentDuelRoundWinner = currentDuelCenter?.roundWinner ?? null;
         const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
-	type HandCardItem = {
-		code: string;
-		uid: string;
+        type HandCardItem = {
+                code: string;
+                uid: string;
 		name?: string;
 		description?: string;
 		imageUrl?: string;
 		might?: number;
 		fire?: number;
 		magic?: number;
-		number: number;
-	};
+                number: number;
+        };
 
-	let playerHandCardItems: HandCardItem[] = [];
+        function matchPlayerIdByUsername(state: GameState | null, username: string | null): string | null {
+                if (!state || !username || !state.playerUsernames) return null;
+                for (const [id, name] of Object.entries(state.playerUsernames)) {
+                        if (name === username) return id;
+                }
+                return null;
+        }
+
+        function resolveMyPlayerId(state: GameState | null): string | null {
+                if (!state) return null;
+                if (authenticatedPlayerId && state.players?.includes(authenticatedPlayerId)) {
+                        return authenticatedPlayerId;
+                }
+                const matched = matchPlayerIdByUsername(state, authenticatedUsername);
+                if (matched) return matched;
+                if (state.players && state.players.length) return state.players[0];
+                return null;
+        }
+
+        function resolveOpponentPlayerId(state: GameState | null, me: string | null): string | null {
+                if (!state || !state.players?.length) return null;
+                if (me) {
+                        const other = state.players.find((id) => id !== me);
+                        if (other) return other;
+                }
+                if (state.players.length >= 2) return state.players[1];
+                return state.players[0];
+        }
+
+        let playerHandCardItems: HandCardItem[] = [];
 	let pendingCardRevealUidSet = new Set<string>();
 	let pendingHiddenUidSet = new Set<string>();
 	let autoFlipCycleCounter = 0;
@@ -87,16 +118,25 @@
 	let opponentDeckAnchorElement: HTMLDivElement | null = null;
 	let opponentHandContainerElement: HTMLDivElement | null = null;
 	let centerSlotAElement: HTMLDivElement | null = null;
-	let centerSlotBElement: HTMLDivElement | null = null;
+        let centerSlotBElement: HTMLDivElement | null = null;
         let lastDefeatEffectCycleId: number | null = null;
 
         let hasInitialStateLoaded = false;
         let previousOppHandCount: number | null = null;
+        let previousOpponentId: string | null = null;
 
-        let playerA: string = 'playerA';
-        let playerB: string = 'playerB';
+        let myPlayerId: string | null = null;
+        let opponentPlayerId: string | null = null;
+
+        let playerAId: string | null = null;
+        let playerBId: string | null = null;
+        let playerAComparisonId = 'playerA';
+        let playerBComparisonId = 'playerB';
         let playerAUsername: string = 'playerA';
         let playerBUsername: string = 'playerB';
+        let winnerLabel: string | null = null;
+        let activePlayerId: string | null = null;
+        let chooserLabel = '';
 
         let historyScrollContainerElement: HTMLDivElement | null = null;
         let lastReturnedCode: string | null = null;
@@ -183,8 +223,12 @@
                         return `${attributeIcon} ${attributeLabel} tie: ${playerAUsername} and ${playerBUsername}${cardNamesText}${statText}.`;
                 }
 
-                const isPlayerAWinner = roundWinner === playerA;
-                const winnerName = isPlayerAWinner ? playerAUsername : roundWinner === playerB ? playerBUsername : roundWinner;
+                const isPlayerAWinner = roundWinner === playerAComparisonId;
+                const winnerName = isPlayerAWinner
+                        ? playerAUsername
+                        : roundWinner === playerBComparisonId
+                        ? playerBUsername
+                        : roundWinner;
                 const loserName = isPlayerAWinner ? playerBUsername : playerAUsername;
                 const winnerCardCode = isPlayerAWinner ? playerACardCode : playerBCardCode;
                 const loserCardCode = isPlayerAWinner ? playerBCardCode : playerACardCode;
@@ -320,7 +364,7 @@
         async function handleTurnTimeoutAutoAction() {
                 const state = $gameStateStore;
                 if (!state || isGameOver()) return;
-                const me = state.players?.[0] ?? null;
+                const me = resolveMyPlayerId(state);
                 if (!me) return;
                 if (state.activePlayerId && state.activePlayerId !== me) return;
 
@@ -419,16 +463,19 @@
 				finalGameResult = null;
 				gameStateStore.set({ ...state, gameId: currentGameId });
 
-				const me = state.players[0];
-				const opp = state.players[1] ?? 'playerB';
+                                const myId = resolveMyPlayerId(state);
+                                const oppId = resolveOpponentPlayerId(state, myId);
 
-				const myCodes = Array.isArray(state.hands?.[me]) ? (state.hands[me] as string[]) : [];
-				const { items, created } = reconcile(playerHandCardItems, myCodes);
-				playerHandCardItems = items;
+                                const myCodes =
+                                        myId && Array.isArray(state.hands?.[myId])
+                                                ? (state.hands[myId] as string[])
+                                                : [];
+                                const { items, created } = reconcile(playerHandCardItems, myCodes);
+                                playerHandCardItems = items;
 
-				let createdFromUnchoose: string[] = [];
-				if (lastReturnedCode) {
-					createdFromUnchoose = playerHandCardItems
+                                let createdFromUnchoose: string[] = [];
+                                if (lastReturnedCode) {
+                                        createdFromUnchoose = playerHandCardItems
 						.filter((it) => it.code === lastReturnedCode && created.includes(it.uid))
 						.map((it) => it.uid);
 				}
@@ -453,15 +500,23 @@
 								magic: d.magic,
 								number: d.number
 							}
-						: it;
-				});
+                                                : it;
+                                });
 
-				const newOppCount = Array.isArray(state.hands?.[opp]) ? state.hands[opp].length : 0;
+                                const newOppCount =
+                                        oppId && Array.isArray(state.hands?.[oppId])
+                                                ? state.hands[oppId].length
+                                                : 0;
 
-				if (state.mode === 'ATTRIBUTE_DUEL' && state.duelStage === 'REVEAL') {
-					centerRevealCycle++;
-					if (advanceTimer) window.clearTimeout(advanceTimer);
-					advanceTimer = window.setTimeout(
+                                if (oppId !== previousOpponentId) {
+                                        previousOppHandCount = null;
+                                        previousOpponentId = oppId;
+                                }
+
+                                if (state.mode === 'ATTRIBUTE_DUEL' && state.duelStage === 'REVEAL') {
+                                        centerRevealCycle++;
+                                        if (advanceTimer) window.clearTimeout(advanceTimer);
+                                        advanceTimer = window.setTimeout(
 						async () => {
 							try {
 								await advanceChronosDuel(currentGameId);
@@ -523,35 +578,37 @@
 		return Boolean(($gameStateStore?.winner ?? finalGameResult?.winner ?? null) !== null);
 	}
 
-	async function onHandCardClick(e: MouseEvent, cardCode: string) {
-		const state = $gameStateStore;
-		if (!state || isGameOver()) return;
-		if (state.mode !== 'ATTRIBUTE_DUEL') return;
-		if (state.duelCenter?.aCardCode) return;
-		if (state.duelStage !== 'PICK_CARD') return;
-		const me = state.players[0];
-		await chooseChronosDuelCard(currentGameId, me, cardCode);
-		await loadGameStateOrFinalResult();
-	}
+        async function onHandCardClick(e: MouseEvent, cardCode: string) {
+                const state = $gameStateStore;
+                if (!state || isGameOver()) return;
+                if (state.mode !== 'ATTRIBUTE_DUEL') return;
+                if (state.duelCenter?.aCardCode) return;
+                if (state.duelStage !== 'PICK_CARD') return;
+                const me = resolveMyPlayerId(state);
+                if (!me) return;
+                await chooseChronosDuelCard(currentGameId, me, cardCode);
+                await loadGameStateOrFinalResult();
+        }
 
-	async function onCenterCardReturnToHand() {
-		const state = $gameStateStore;
-		if (!state) return;
-		if (state.mode !== 'ATTRIBUTE_DUEL') return;
-		if (state.duelStage === 'REVEAL') return;
-		if (!state.duelCenter?.aCardCode) return;
-		const me = state.players[0];
-		lastReturnedCode = state.duelCenter.aCardCode || null;
-		await unchooseChronosDuelCard(currentGameId, me);
-		await loadGameStateOrFinalResult();
-	}
+        async function onCenterCardReturnToHand() {
+                const state = $gameStateStore;
+                if (!state) return;
+                if (state.mode !== 'ATTRIBUTE_DUEL') return;
+                if (state.duelStage === 'REVEAL') return;
+                if (!state.duelCenter?.aCardCode) return;
+                const me = resolveMyPlayerId(state);
+                if (!me) return;
+                lastReturnedCode = state.duelCenter.aCardCode || null;
+                await unchooseChronosDuelCard(currentGameId, me);
+                await loadGameStateOrFinalResult();
+        }
 
-	async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
-		if (isGameOver()) return;
-		const me = $gameStateStore?.players?.[0] ?? 'playerA';
-		await chooseChronosDuelAttribute(currentGameId, me, attr);
-		await loadGameStateOrFinalResult();
-	}
+        async function chooseAttr(attr: 'magic' | 'might' | 'fire') {
+                if (isGameOver()) return;
+                const me = myPlayerId ?? resolveMyPlayerId($gameStateStore) ?? 'playerA';
+                await chooseChronosDuelAttribute(currentGameId, me, attr);
+                await loadGameStateOrFinalResult();
+        }
 
         function detectChosenAttributeMode(
                 center: GameState['duelCenter'] | null | undefined
@@ -1106,16 +1163,20 @@
         function findLoserCenterElement(): HTMLElement | null {
                 const winner = currentDuelRoundWinner;
                 if (!winner) return null;
-                if (winner === playerA) return centerSlotBElement;
-                if (winner === playerB) return centerSlotAElement;
+                if (winner === playerAComparisonId) return centerSlotBElement;
+                if (winner === playerBComparisonId) return centerSlotAElement;
                 return null;
         }
 
         onMount(async () => {
                 if (browser) {
                         authToken = localStorage.getItem('token');
+                        authenticatedPlayerId = localStorage.getItem('userId');
+                        authenticatedUsername = localStorage.getItem('username');
                         storageListener = (event: StorageEvent) => {
                                 if (event.key === 'token') authToken = event.newValue;
+                                if (event.key === 'userId') authenticatedPlayerId = event.newValue;
+                                if (event.key === 'username') authenticatedUsername = event.newValue;
                         };
                         window.addEventListener('storage', storageListener);
                         timerInterval = window.setInterval(() => {
@@ -1132,25 +1193,46 @@
                 if (browser && storageListener) window.removeEventListener('storage', storageListener);
         });
 
-	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
-	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
-	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
-	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
-	$: duelStage = currentDuelStage ?? null;
-	$: duelCenter = currentDuelCenter ?? null;
-	$: chooserId = duelCenter?.chooserId ?? playerA;
-	$: discardPiles = $gameStateStore?.discardPiles ?? null;
-	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
-	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
-	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
-		? $gameStateStore!.decks[playerA].length
-		: 0;
-	$: deckB = Array.isArray($gameStateStore?.decks?.[playerB])
-		? $gameStateStore!.decks[playerB].length
-		: 0;
-        $: oppHandCount = Array.isArray($gameStateStore?.hands?.[playerB])
-                ? $gameStateStore!.hands[playerB].length
-                : 0;
+        $: myPlayerId = resolveMyPlayerId($gameStateStore);
+        $: opponentPlayerId = resolveOpponentPlayerId($gameStateStore, myPlayerId);
+        $: playerAId = myPlayerId ?? $gameStateStore?.players?.[0] ?? null;
+        $: playerBId =
+                opponentPlayerId ??
+                resolveOpponentPlayerId($gameStateStore, playerAId) ??
+                null;
+        $: playerAUsername = playerAId
+                ? $gameStateStore?.playerUsernames?.[playerAId] ?? playerAId
+                : 'playerA';
+        $: playerBUsername = playerBId
+                ? $gameStateStore?.playerUsernames?.[playerBId] ?? playerBId
+                : 'playerB';
+        $: playerAComparisonId = playerAId ?? 'playerA';
+        $: playerBComparisonId = playerBId ?? 'playerB';
+        $: duelStage = currentDuelStage ?? null;
+        $: duelCenter = currentDuelCenter ?? null;
+        $: chooserId = duelCenter?.chooserId ?? playerAId ?? 'playerA';
+        $: chooserLabel = !chooserId
+                ? ''
+                : chooserId === playerAComparisonId
+                ? playerAUsername
+                : chooserId === playerBComparisonId
+                ? playerBUsername
+                : chooserId;
+        $: discardPiles = $gameStateStore?.discardPiles ?? null;
+        $: hpA = playerAId ? $gameStateStore?.hp?.[playerAId] ?? 0 : 0;
+        $: hpB = playerBId ? $gameStateStore?.hp?.[playerBId] ?? 0 : 0;
+        $: deckA =
+                playerAId && Array.isArray($gameStateStore?.decks?.[playerAId])
+                        ? $gameStateStore!.decks[playerAId].length
+                        : 0;
+        $: deckB =
+                playerBId && Array.isArray($gameStateStore?.decks?.[playerBId])
+                        ? $gameStateStore!.decks[playerBId].length
+                        : 0;
+        $: oppHandCount =
+                playerBId && Array.isArray($gameStateStore?.hands?.[playerBId])
+                        ? $gameStateStore!.hands[playerBId].length
+                        : 0;
 
         $: currentTurnDeadline =
                 typeof $gameStateStore?.turnDeadline === 'number' ? $gameStateStore.turnDeadline : null;
@@ -1177,8 +1259,15 @@
         } else if (handledTurnDeadline !== null && currentTurnDeadline !== handledTurnDeadline) {
                 handledTurnDeadline = null;
         }
+        $: activePlayerId = $gameStateStore?.activePlayerId ?? null;
+        $: winnerLabel = (() => {
+                const rawWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
+                if (!rawWinner) return null;
+                const label = $gameStateStore?.playerUsernames?.[rawWinner] ?? rawWinner;
+                return typeof label === 'string' ? label : String(label);
+        })();
 
-	let myHandContainerElement: HTMLDivElement | null = null;
+        let myHandContainerElement: HTMLDivElement | null = null;
 	let myHandCardSpreadPixels: number | null = null;
 	function computeSpread() {
 		const count = Math.max(1, playerHandCardItems.length);
@@ -1196,11 +1285,11 @@
                 $gameStateStore?.mode === 'ATTRIBUTE_DUEL' &&
                 Boolean(currentDuelCenter?.aCardCode) &&
                 currentDuelStage !== 'REVEAL' &&
-                ($gameStateStore?.players?.[0] ?? '') === chooserId;
+                ((myPlayerId ?? $gameStateStore?.players?.[0] ?? '') === chooserId);
 
         $: chooserCardDetails =
                 duelStage === 'PICK_ATTRIBUTE' &&
-                chooserId === playerA &&
+                chooserId === playerAComparisonId &&
                 currentDuelCenter?.aCardCode
                         ? cardDetailsCacheByCode.get(currentDuelCenter.aCardCode) ?? null
                         : null;
@@ -1391,9 +1480,18 @@
 						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
 					>
 						{#if currentDuelCenter?.aCardCode}
-							<div
-								bind:this={centerSlotAElement}
-								class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerA ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerA ? 'loser-shake' : ''}`}
+                                                        <div
+                                                                bind:this={centerSlotAElement}
+                                                                class={`result-wrap ${
+                                                                        currentDuelStage === 'REVEAL' &&
+                                                                        currentDuelRoundWinner === playerAComparisonId
+                                                                                ? 'winner-glow'
+                                                                                : currentDuelStage === 'REVEAL' &&
+                                                                                  currentDuelRoundWinner &&
+                                                                                  currentDuelRoundWinner !== playerAComparisonId
+                                                                                  ? 'loser-shake'
+                                                                                  : ''
+                                                                }`}
 								on:click={onCenterCardReturnToHand}
 								title="Return card to hand"
 							>
@@ -1441,9 +1539,19 @@
 									style={`--flip-ms:${FLIP_MS}ms;`}
 								>
 									<div class="face front">
-										<div
-											bind:this={centerSlotBElement}
-											class={`result-wrap ${currentDuelStage === 'REVEAL' && currentDuelRoundWinner === playerB ? 'winner-glow' : currentDuelStage === 'REVEAL' && currentDuelRoundWinner && currentDuelRoundWinner !== playerB ? 'loser-shake' : ''}`}
+                                                                        <div
+                                                                                bind:this={centerSlotBElement}
+                                                                                class={`result-wrap ${
+                                                                                        currentDuelStage === 'REVEAL' &&
+                                                                                        currentDuelRoundWinner === playerBComparisonId
+                                                                                                ? 'winner-glow'
+                                                                                                : currentDuelStage === 'REVEAL' &&
+                                                                                                  currentDuelRoundWinner &&
+                                                                                                  currentDuelRoundWinner !==
+                                                                                                          playerBComparisonId
+                                                                                                ? 'loser-shake'
+                                                                                                : ''
+                                                                                }`}
 										>
 											<CardComposite
 												artImageUrl={cardDetailsCacheByCode.get(
@@ -1489,7 +1597,7 @@
 					</div>
 				</div>
 
-				{#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerA}
+                                {#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerAComparisonId}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
 						<span>Choose attribute:</span>
 						<div>
@@ -1534,11 +1642,11 @@
                                                         </button>
 						</div>
 					</div>
-				{:else if duelStage === 'PICK_ATTRIBUTE'}
-					<div class="notice warn" style="margin-top:12px; text-align:center;">
-						Waiting for {chooserId} to choose the attribute…
-					</div>
-				{/if}
+                                {:else if duelStage === 'PICK_ATTRIBUTE'}
+                                        <div class="notice warn" style="margin-top:12px; text-align:center;">
+                                                Waiting for {(chooserLabel || chooserId)} to choose the attribute…
+                                        </div>
+                                {/if}
 
 				{#if duelStage === 'REVEAL' && !currentDuelRoundWinner}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
@@ -1549,12 +1657,12 @@
 
 			<div class="center-right">
 				<div class="zone-header">
-					<span class="pill name">⚔️ Attribute Duel</span>
-					{#if discardPiles}
-						<span class="pill">{playerAUsername} pile: {(discardPiles[playerA] ?? []).length}</span>
-						<span class="pill">{playerBUsername} pile: {(discardPiles[playerB] ?? []).length}</span>
-					{/if}
-				</div>
+                                        <span class="pill name">⚔️ Attribute Duel</span>
+                                        {#if discardPiles}
+                                                <span class="pill">{playerAUsername} pile: {(discardPiles[playerAComparisonId] ?? []).length}</span>
+                                                <span class="pill">{playerBUsername} pile: {(discardPiles[playerBComparisonId] ?? []).length}</span>
+                                        {/if}
+                                </div>
 
                                 {#if combinedHistoryLogEntries.length}
                                         <div class="history">
@@ -1576,10 +1684,12 @@
 		</div>
 	</section>
 
-	{#if resolvedWinner !== null}
-		<div class="notice success" style="margin-top:12px; text-align:center;">
-			{resolvedWinner === 'DRAW' ? 'Partida empatada' : `Winner: ${resolvedWinner}`}
-		</div>
+        {#if resolvedWinner !== null}
+                <div class="notice success" style="margin-top:12px; text-align:center;">
+                        {resolvedWinner === 'DRAW'
+                                ? 'Partida empatada'
+                                : `Winner: ${winnerLabel ?? resolvedWinner}`}
+                </div>
 		<div style="margin-top:8px;text-align:center;">
 			<a href="/" class="btn" style="text-decoration:none;">Back to home</a>
 		</div>
