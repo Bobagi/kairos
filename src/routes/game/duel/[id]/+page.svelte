@@ -51,6 +51,16 @@
         $: currentDuelRoundWinner = currentDuelCenter?.roundWinner ?? null;
         const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
 
+        let now = Date.now();
+        let duelTimerHandle: ReturnType<typeof setInterval> | null = null;
+
+        function formatRemainingTime(milliseconds: number): string {
+                const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
 	type HandCardItem = {
 		code: string;
 		uid: string;
@@ -1050,23 +1060,32 @@
         }
 
         onMount(async () => {
-                if (browser) authenticationToken = localStorage.getItem('token');
+                if (browser) {
+                        authenticationToken = localStorage.getItem('token');
+                        duelTimerHandle = window.setInterval(() => {
+                                now = Date.now();
+                        }, 250);
+                }
                 await loadGameStateOrFinalResult();
                 setupMyHandResizeObserver();
         });
 
-	onDestroy(() => {
-		if (advanceTimer) window.clearTimeout(advanceTimer);
-	});
+        onDestroy(() => {
+                if (advanceTimer) window.clearTimeout(advanceTimer);
+                if (duelTimerHandle) {
+                        window.clearInterval(duelTimerHandle);
+                        duelTimerHandle = null;
+                }
+        });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
 	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
 	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
 	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
-	$: duelStage = currentDuelStage ?? null;
-	$: duelCenter = currentDuelCenter ?? null;
-	$: chooserId = duelCenter?.chooserId ?? playerA;
-	$: discardPiles = $gameStateStore?.discardPiles ?? null;
+        $: duelStage = currentDuelStage ?? null;
+        $: duelCenter = currentDuelCenter ?? null;
+        $: chooserId = duelCenter?.chooserId ?? playerA;
+        $: discardPiles = $gameStateStore?.discardPiles ?? null;
 	$: hpA = $gameStateStore?.hp?.[playerA] ?? 0;
 	$: hpB = $gameStateStore?.hp?.[playerB] ?? 0;
 	$: deckA = Array.isArray($gameStateStore?.decks?.[playerA])
@@ -1098,6 +1117,26 @@
                 Boolean(currentDuelCenter?.aCardCode) &&
                 currentDuelStage !== 'REVEAL' &&
                 ($gameStateStore?.players?.[0] ?? '') === chooserId;
+        $: duelDeadlineAt =
+                typeof currentDuelCenter?.deadlineAt === 'number'
+                        ? currentDuelCenter.deadlineAt
+                        : null;
+        $: duelTimerWinner = $gameStateStore?.winner ?? finalGameResult?.winner ?? null;
+        $: duelRemainingMs =
+                duelTimerWinner === null && duelDeadlineAt ? Math.max(0, duelDeadlineAt - now) : null;
+        $: duelCountdownText = duelRemainingMs !== null ? formatRemainingTime(duelRemainingMs) : null;
+        $: duelTimerLabel = (() => {
+                if (!duelCountdownText) return null;
+                if (currentDuelStage === 'PICK_ATTRIBUTE') {
+                        return chooserId === playerA ? 'Choose attribute' : 'Opponent choosing';
+                }
+                if (currentDuelStage === 'PICK_CARD') {
+                        return 'Select cards';
+                }
+                return null;
+        })();
+        $: showDuelCountdown = Boolean(duelCountdownText && duelTimerLabel);
+        $: duelCountdownCritical = Boolean(duelRemainingMs !== null && duelRemainingMs <= 3000);
 
         $: chooserCardDetails =
                 duelStage === 'PICK_ATTRIBUTE' &&
@@ -1200,6 +1239,13 @@
         <a href="/" class="home-btn">← Home</a>
         <div class="mode-pill"><strong>Mode:</strong> ATTRIBUTE_DUEL</div>
 </div>
+
+{#if showDuelCountdown}
+        <div class={`turn-timer ${duelCountdownCritical ? 'critical' : ''}`}>
+                <span class="label">{duelTimerLabel}</span>
+                <span class="time">{duelCountdownText}</span>
+        </div>
+{/if}
 
 {#if !($gameStateStore?.winner ?? finalGameResult?.winner ?? null)}
         <div class="surrender-row">
@@ -1544,6 +1590,43 @@
 <div class="fx-layer" bind:this={fxLayerElement}></div>
 
 <style>
+        .turn-timer {
+                margin: 12px auto;
+                padding: 8px 16px;
+                max-width: 240px;
+                border-radius: 999px;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(148, 163, 184, 0.45);
+                color: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                font-size: 0.95rem;
+        }
+
+        .turn-timer.critical {
+                border-color: rgba(248, 113, 113, 0.85);
+                background: rgba(185, 28, 28, 0.35);
+                color: #fee2e2;
+        }
+
+        .turn-timer .label {
+                letter-spacing: 0.02em;
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                color: rgba(226, 232, 240, 0.85);
+        }
+
+        .turn-timer.critical .label {
+                color: rgba(254, 226, 226, 0.9);
+        }
+
+        .turn-timer .time {
+                font-variant-numeric: tabular-nums;
+                font-weight: 600;
+        }
+
         .surrender-row {
                 margin: 12px auto;
                 max-width: 320px;

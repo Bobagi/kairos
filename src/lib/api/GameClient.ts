@@ -6,9 +6,10 @@ interface KairosRuntimeEnvironmentVariables extends ImportMetaEnv {
 }
 
 const runtimeEnvironmentVariables = import.meta.env as KairosRuntimeEnvironmentVariables;
-const chronosApiBaseUrl: string = runtimeEnvironmentVariables.DEV
-        ? ''
-        : runtimeEnvironmentVariables.VITE_API_BASE_URL ?? '';
+const configuredChronosBaseUrl = runtimeEnvironmentVariables.VITE_API_BASE_URL;
+const chronosApiBaseUrl: string = typeof configuredChronosBaseUrl === 'string'
+        ? configuredChronosBaseUrl.trim()
+        : '';
 
 function normalizeHeadersInitToObject(headersInit?: HeadersInit): Record<string, string> {
         if (!headersInit) {

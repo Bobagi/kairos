@@ -15,7 +15,7 @@
 	import PlayFXOverlay from '$lib/components/PlayFXOverlay.svelte';
 	import { fx as visualEffectsStore } from '$lib/stores/fx';
 	import { game as gameStateStore, type GameState } from '$lib/stores/game';
-	import { onMount } from 'svelte';
+        import { onDestroy, onMount } from 'svelte';
 	import '../../game.css';
 
 	export const DRAW_TRAVEL_MS = 420;
@@ -38,10 +38,20 @@
 
         let errorMessageText: string | null = null;
         let authenticationToken: string | null = null;
-	let finalGameResult: { winner: string | null; log: string[] } | null = null;
+        let finalGameResult: { winner: string | null; log: string[] } | null = null;
 
-	$: currentGameId = $sveltePageStore.params.id;
-	const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+        $: currentGameId = $sveltePageStore.params.id;
+        const cardWidthCssValue = 'clamp(104px, 17.5vw, 200px)';
+
+        let now = Date.now();
+        let turnTimerHandle: ReturnType<typeof setInterval> | null = null;
+
+        function formatRemainingTime(milliseconds: number): string {
+                const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
 
 	type HandCardItem = {
 		code: string;
@@ -311,10 +321,22 @@
         }
 
         onMount(async () => {
-                if (browser) authenticationToken = localStorage.getItem('token');
+                if (browser) {
+                        authenticationToken = localStorage.getItem('token');
+                        turnTimerHandle = window.setInterval(() => {
+                                now = Date.now();
+                        }, 250);
+                }
                 await fetchTemplate();
                 await loadGameStateOrFinalResult();
                 setupMyHandResizeObserver();
+        });
+
+        onDestroy(() => {
+                if (turnTimerHandle) {
+                        window.clearInterval(turnTimerHandle);
+                        turnTimerHandle = null;
+                }
         });
 
 	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
@@ -354,16 +376,72 @@
 	$: oppDeckEmpty = deckB === 0;
 	$: currentTurnIndex = typeof $gameStateStore?.turn === 'number' ? $gameStateStore.turn % 2 : 0;
 	$: isMyTurn = ($gameStateStore?.players?.[currentTurnIndex] ?? playerA) === playerA;
-	$: showLocalSkip =
-		!isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: showLocalSkip =
+                !isGameOver() && isMyTurn && myHandEmpty && myDeckEmpty && oppHandEmpty && oppDeckEmpty;
+        $: currentTurnDeadline =
+                typeof $gameStateStore?.turnDeadline === 'number'
+                        ? $gameStateStore.turnDeadline
+                        : null;
+        $: remainingTurnMs =
+                !$gameStateStore?.winner && currentTurnDeadline ? Math.max(0, currentTurnDeadline - now) : null;
+        $: formattedTurnCountdown =
+                remainingTurnMs !== null ? formatRemainingTime(remainingTurnMs) : null;
+        $: showTurnCountdown =
+                Boolean(formattedTurnCountdown && !$gameStateStore?.winner && currentTurnDeadline);
+        $: isCountdownCritical = Boolean(remainingTurnMs !== null && remainingTurnMs <= 3000);
+        $: turnCountdownLabel = isMyTurn ? 'Your turn' : 'Opponent turn';
 </script>
 
 <div class="fixed-top-bar">
-	<a href="/" class="home-btn">← Home</a>
-	<div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
+        <a href="/" class="home-btn">← Home</a>
+        <div class="mode-pill"><strong>Mode:</strong> CLASSIC</div>
 </div>
 
+{#if showTurnCountdown}
+        <div class={`turn-timer ${isCountdownCritical ? 'critical' : ''}`}>
+                <span class="label">{turnCountdownLabel}</span>
+                <span class="time">{formattedTurnCountdown}</span>
+        </div>
+{/if}
+
 <style>
+        .turn-timer {
+                margin: 12px auto;
+                padding: 8px 16px;
+                max-width: 220px;
+                border-radius: 999px;
+                background: rgba(15, 23, 42, 0.6);
+                border: 1px solid rgba(148, 163, 184, 0.45);
+                color: #f8fafc;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                font-size: 0.95rem;
+        }
+
+        .turn-timer.critical {
+                border-color: rgba(248, 113, 113, 0.85);
+                background: rgba(185, 28, 28, 0.35);
+                color: #fee2e2;
+        }
+
+        .turn-timer .label {
+                letter-spacing: 0.02em;
+                text-transform: uppercase;
+                font-size: 0.75rem;
+                color: rgba(226, 232, 240, 0.85);
+        }
+
+        .turn-timer.critical .label {
+                color: rgba(254, 226, 226, 0.9);
+        }
+
+        .turn-timer .time {
+                font-variant-numeric: tabular-nums;
+                font-weight: 600;
+        }
+
         .surrender-row {
                 margin: 12px auto;
                 max-width: 320px;
