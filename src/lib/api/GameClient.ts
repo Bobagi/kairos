@@ -6,45 +6,22 @@ interface KairosRuntimeEnvironmentVariables extends ImportMetaEnv {
 }
 
 const runtimeEnvironmentVariables = import.meta.env as KairosRuntimeEnvironmentVariables;
+const DEFAULT_CHRONOS_BASE_URL = 'http://localhost:3053';
+
 const configuredChronosBaseUrl = runtimeEnvironmentVariables.VITE_API_BASE_URL;
 
-const resolvedChronosBaseUrl = typeof configuredChronosBaseUrl === 'string'
-        ? configuredChronosBaseUrl.trim().replace(/\/+$/, '')
-        : '';
-
-function shouldFallbackToRelativeChronosRequests(baseUrl: string): boolean {
-        if (typeof window === 'undefined') {
-                return false;
+const resolvedChronosBaseUrl = (() => {
+        if (
+                typeof configuredChronosBaseUrl === 'string' &&
+                configuredChronosBaseUrl.trim().length > 0
+        ) {
+                return configuredChronosBaseUrl.trim().replace(/\/+$/, '');
         }
-
-        try {
-                const parsedBaseUrl = new URL(baseUrl);
-                const { protocol: pageProtocol, hostname: pageHost } = window.location;
-
-                const isSecurePage = pageProtocol === 'https:';
-                const isLocalhost = /^(localhost|127\.0\.0\.1)$/i.test(parsedBaseUrl.hostname);
-                const sameHost = parsedBaseUrl.hostname === pageHost;
-
-                if (isSecurePage && parsedBaseUrl.protocol === 'http:' && sameHost && isLocalhost) {
-                        return true;
-                }
-        } catch {
-                return false;
-        }
-
-        return false;
-}
+        return DEFAULT_CHRONOS_BASE_URL;
+})();
 
 function buildChronosApiUrl(path: string): string {
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-        if (!resolvedChronosBaseUrl) {
-                return normalizedPath;
-        }
-
-        if (shouldFallbackToRelativeChronosRequests(resolvedChronosBaseUrl)) {
-                return normalizedPath;
-        }
-
         return `${resolvedChronosBaseUrl}${normalizedPath}`;
 }
 

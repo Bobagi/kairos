@@ -219,6 +219,59 @@
                 return stats[attr] === highest && highest > 0;
         }
 
+        function resolveStrongestAttributeFromDetails(
+                details: Pick<CardDetails, 'magic' | 'might' | 'fire'> | null | undefined
+        ): 'magic' | 'might' | 'fire' | null {
+                if (!details) return null;
+                const stats: Record<'magic' | 'might' | 'fire', number> = {
+                        magic: Number(details.magic ?? 0),
+                        might: Number(details.might ?? 0),
+                        fire: Number(details.fire ?? 0)
+                };
+                let best: 'magic' | 'might' | 'fire' = 'magic';
+                let bestValue = -Infinity;
+                for (const attribute of ['magic', 'might', 'fire'] as const) {
+                        const value = stats[attribute];
+                        if (value > bestValue) {
+                                best = attribute;
+                                bestValue = value;
+                        }
+                }
+                return bestValue > -Infinity ? best : null;
+        }
+
+        function resolveStrongestAttributeForCard(
+                cardCode: string | null | undefined
+        ): 'magic' | 'might' | 'fire' | null {
+                if (!cardCode) return null;
+                const details = cardDetailsCacheByCode.get(cardCode) ?? null;
+                return resolveStrongestAttributeFromDetails(details);
+        }
+
+        function resolvePreferredAttributeForChooser(
+                chooser: string | null | undefined
+        ): 'magic' | 'might' | 'fire' {
+                const cardCode = chooser
+                        ? chooser === playerA
+                                ? currentDuelCenter?.aCardCode ?? null
+                                : currentDuelCenter?.bCardCode ?? null
+                        : null;
+                const preferred =
+                        resolveStrongestAttributeForCard(cardCode) ??
+                        resolveStrongestAttributeFromDetails(chooser === playerA ? chooserCardDetails : null);
+                return preferred ?? 'magic';
+        }
+
+        function isBotIdentity(
+                playerId: string | null | undefined,
+                username: string | null | undefined
+        ): boolean {
+                const normalizedId = (playerId ?? '').trim().toUpperCase();
+                if (normalizedId === 'BOT') return true;
+                const normalizedName = (username ?? '').toLowerCase();
+                return /\bbot\b/.test(normalizedName);
+        }
+
 	const makeUid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
 	function reconcile(prev: HandCardItem[], nextCodes: string[]) {
@@ -1080,11 +1133,12 @@
                 }
         });
 
-	$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
-	$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
-	$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
-	$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
-        $: duelStage = currentDuelStage ?? null;
+$: playerA = $gameStateStore?.players?.[0] ?? 'playerA';
+$: playerB = $gameStateStore?.players?.[1] ?? 'playerB';
+$: playerAUsername = $gameStateStore?.playerUsernames?.[playerA] ?? playerA;
+$: playerBUsername = $gameStateStore?.playerUsernames?.[playerB] ?? playerB;
+$: opponentLooksLikeBot = isBotIdentity(playerB, playerBUsername);
+$: duelStage = currentDuelStage ?? null;
         $: duelCenter = currentDuelCenter ?? null;
         $: chooserId = duelCenter?.chooserId ?? playerA;
         $: discardPiles = $gameStateStore?.discardPiles ?? null;
@@ -1162,14 +1216,17 @@
                                         ? ($gameStateStore?.hands?.[playerA] as string[] | undefined)
                                         : ($gameStateStore?.hands?.[playerB] as string[] | undefined);
                                 const fallbackCardCode = Array.isArray(hand) && hand.length > 0 ? hand[0] : '';
-                                void chooseChronosDuelCard(currentGameId, actorId, fallbackCardCode)
-                                        .then(() => loadGameStateOrFinalResult())
-                                        .catch((error) =>
-                                                console.error('Failed to auto-resolve duel card timeout', error)
-                                        );
+                                if (fallbackCardCode) {
+                                        void chooseChronosDuelCard(currentGameId, actorId, fallbackCardCode)
+                                                .then(() => loadGameStateOrFinalResult())
+                                                .catch((error) =>
+                                                        console.error('Failed to auto-resolve duel card timeout', error)
+                                                );
+                                }
                         } else if (currentDuelStage === 'PICK_ATTRIBUTE') {
                                 const chooser = chooserId ?? playerA;
-                                void chooseChronosDuelAttribute(currentGameId, chooser, 'magic')
+                                const attribute = resolvePreferredAttributeForChooser(chooser);
+                                void chooseChronosDuelAttribute(currentGameId, chooser, attribute)
                                         .then(() => loadGameStateOrFinalResult())
                                         .catch((error) =>
                                                 console.error('Failed to auto-resolve duel attribute timeout', error)
@@ -1393,17 +1450,17 @@
 						{/if}
 					</div>
 
-					<div
-						class="duel-slot"
-						style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
-					>
-						{#if currentDuelCenter?.bCardCode}
-							<div class="flip-wrap" data-cycle={centerRevealCycle}>
-								<div
-									class="flipper"
-									class:start-back={currentDuelStage !== 'REVEAL'}
-									class:animate={currentDuelStage === 'REVEAL'}
-									style={`--flip-ms:${FLIP_MS}ms;`}
+                                        <div
+                                                class="duel-slot"
+                                                style={`width:${cardWidthCssValue}; height:calc(${cardWidthCssValue} * 1.55);`}
+                                        >
+                                                {#if currentDuelCenter?.bCardCode}
+                                                        <div class="flip-wrap" data-cycle={centerRevealCycle}>
+                                                                <div
+                                                                        class="flipper"
+                                                                        class:start-back={currentDuelStage !== 'REVEAL'}
+                                                                        class:animate={currentDuelStage === 'REVEAL'}
+                                                                        style={`--flip-ms:${FLIP_MS}ms;`}
 								>
 									<div class="face front">
 										<div
@@ -1445,14 +1502,18 @@
 										/>
 									</div>
 								</div>
-							</div>
-						{:else}
-							<div class="slot-empty slot-empty-opp">
-								<span class="slot-icon">⚔️</span>
-							</div>
-						{/if}
-					</div>
-				</div>
+                                                        </div>
+                                                {:else if opponentLooksLikeBot && duelStage === 'PICK_CARD'}
+                                                        <div class="slot-placeholder bot-card-back">
+                                                                <img src={cardBackImageUrl} alt="Bot card hidden" />
+                                                        </div>
+                                                {:else}
+                                                        <div class="slot-empty slot-empty-opp">
+                                                                <span class="slot-icon">⚔️</span>
+                                                        </div>
+                                                {/if}
+                                        </div>
+                                </div>
 
 				{#if duelStage === 'PICK_ATTRIBUTE' && chooserId === playerA}
 					<div class="notice chooser" style="margin-top:12px; text-align:center;">
@@ -1665,6 +1726,43 @@
         .turn-timer .time {
                 font-variant-numeric: tabular-nums;
                 font-weight: 600;
+        }
+
+        .attribute-option.attribute-highlight {
+                background: rgba(16, 185, 129, 0.22);
+                border-color: rgba(16, 185, 129, 0.55);
+                color: #f0fdf4;
+                box-shadow: 0 0 0 rgba(16, 185, 129, 0.35);
+                transition: background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+        }
+
+        .attribute-option.attribute-highlight:hover:not(:disabled) {
+                background: rgba(5, 150, 105, 0.32);
+                box-shadow: 0 0 18px rgba(16, 185, 129, 0.4);
+                transform: translateY(-1px);
+        }
+
+        .attribute-option.attribute-highlight:active:not(:disabled) {
+                transform: translateY(0);
+        }
+
+        .slot-placeholder {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: clamp(104px, 17.5vw, 200px);
+                aspect-ratio: 430 / 670;
+                border-radius: 12px;
+                background: rgba(15, 23, 42, 0.65);
+                border: 1px solid rgba(148, 163, 184, 0.3);
+        }
+
+        .slot-placeholder.bot-card-back img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                border-radius: 10px;
+                filter: brightness(0.85);
         }
 
         .surrender-row {
