@@ -12,6 +12,7 @@
                 sendChronosFriendRequest,
                 removeChronosFriend,
                 startChronosGameWithFriend,
+                ChronosApiError,
                 type ChronosFriendChatMessage,
                 type ChronosFriendSummary,
                 type ChronosIncomingFriendRequest,
@@ -64,28 +65,39 @@
                 fallback: string,
                 defaultTone: PanelNotice['tone'] = 'error',
         ): PanelNotice {
-                const rawMessage =
-                        error instanceof Error
-                                ? error.message
-                                : typeof error === 'string'
-                                        ? error
-                                        : error
-                                                ? JSON.stringify(error)
-                                                : '';
-                const normalized = rawMessage.toLowerCase();
+                if (error instanceof ChronosApiError) {
+                        if (error.status === 401) {
+                                return {
+                                        text: 'Your Chronos session expired. Please sign in again to manage friends.',
+                                        tone: 'warning',
+                                };
+                        }
 
-                if (/p2021/.test(normalized) || /friendship/.test(normalized)) {
-                        return {
-                                text: 'Chronos backend is missing the friendship tables. Execute the latest Prisma migrations in Chronos (e.g. pnpm prisma migrate deploy) and seed the database before testing the friends features.',
-                                tone: 'warning',
-                        };
+                        if (error.status === 500 && error.path.startsWith('/friends')) {
+                                return {
+                                        text: 'Chronos backend is missing the friendship tables. Execute the latest Prisma migrations in Chronos (e.g. pnpm prisma migrate deploy) and seed the database before testing the friends features.',
+                                        tone: 'warning',
+                                };
+                        }
+
+                        let bodyMessage = '';
+                        if (typeof error.bodyJson === 'object' && error.bodyJson !== null) {
+                                const messageCandidate = (error.bodyJson as { message?: unknown }).message;
+                                if (typeof messageCandidate === 'string') {
+                                        bodyMessage = messageCandidate.trim();
+                                }
+                        }
+
+                        const text = bodyMessage || error.bodyText.trim() || fallback;
+                        return { text, tone: defaultTone };
                 }
 
-                if (/unauthorized/.test(normalized) || /401/.test(normalized)) {
-                        return {
-                                text: 'Your Chronos session expired. Please sign in again to manage friends.',
-                                tone: 'warning',
-                        };
+                if (error instanceof Error && error.message) {
+                        return { text: error.message, tone: defaultTone };
+                }
+
+                if (typeof error === 'string' && error.trim().length > 0) {
+                        return { text: error.trim(), tone: defaultTone };
                 }
 
                 return { text: fallback, tone: defaultTone };
@@ -556,7 +568,7 @@
         .friends-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(7, 10, 18, 0.82);
+                background: rgba(6, 5, 2, 0.88);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -568,12 +580,12 @@
                 width: min(1024px, 100%);
                 max-height: 92vh;
                 overflow-y: auto;
-                background: linear-gradient(160deg, rgba(15, 23, 42, 0.92), rgba(9, 13, 24, 0.88));
-                border: 1px solid rgba(148, 163, 184, 0.25);
+                background: linear-gradient(150deg, rgba(10, 9, 4, 0.94), rgba(32, 25, 7, 0.9));
+                border: 1px solid rgba(250, 204, 21, 0.32);
                 border-radius: 20px;
                 padding: clamp(22px, 4vw, 36px);
-                box-shadow: 0 30px 60px rgba(2, 6, 14, 0.6);
-                color: #eef2ff;
+                box-shadow: 0 30px 60px rgba(0, 0, 0, 0.65);
+                color: #fefce8;
                 backdrop-filter: blur(10px) saturate(1.2);
         }
 
@@ -605,11 +617,11 @@
         }
 
         .card {
-                background: rgba(12, 18, 32, 0.78);
-                border: 1px solid rgba(148, 163, 184, 0.22);
+                background: rgba(14, 11, 4, 0.85);
+                border: 1px solid rgba(250, 204, 21, 0.22);
                 border-radius: 18px;
                 padding: clamp(16px, 2.8vw, 22px);
-                box-shadow: 0 18px 40px rgba(2, 6, 14, 0.38);
+                box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
                 display: flex;
                 flex-direction: column;
                 gap: clamp(12px, 2vw, 18px);
@@ -625,7 +637,7 @@
         .card-hint {
                 margin: 4px 0 0;
                 font-size: 0.85rem;
-                color: rgba(199, 210, 254, 0.75);
+                color: rgba(253, 224, 71, 0.7);
         }
 
         .search-form {
@@ -640,8 +652,8 @@
                 min-width: 0;
                 padding: 10px 12px;
                 border-radius: 12px;
-                border: 1px solid rgba(148, 163, 184, 0.3);
-                background: rgba(9, 13, 24, 0.92);
+                border: 1px solid rgba(250, 204, 21, 0.28);
+                background: rgba(12, 9, 3, 0.92);
                 color: inherit;
                 font-size: 0.95rem;
         }
@@ -649,8 +661,8 @@
         input[type='search']:focus,
         input[type='text']:focus {
                 outline: none;
-                border-color: rgba(129, 199, 255, 0.65);
-                box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+                border-color: rgba(250, 204, 21, 0.65);
+                box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.22);
         }
 
         .button {
@@ -667,13 +679,13 @@
                 font-size: 0.82rem;
                 cursor: pointer;
                 transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease, border-color 0.2s ease;
-                color: #eef2ff;
-                background: rgba(30, 41, 59, 0.85);
+                color: #fef9c3;
+                background: rgba(38, 28, 7, 0.9);
         }
 
         .button:hover:not(:disabled) {
                 transform: translateY(-1px);
-                box-shadow: 0 8px 20px rgba(15, 23, 42, 0.45);
+                box-shadow: 0 8px 20px rgba(250, 204, 21, 0.25);
         }
 
         .button:disabled {
@@ -687,28 +699,28 @@
         }
 
         .button-accent {
-                background: linear-gradient(160deg, rgba(56, 189, 248, 0.95), rgba(59, 130, 246, 0.95));
-                border-color: rgba(148, 197, 255, 0.45);
-                color: #0f172a;
+                background: linear-gradient(150deg, rgba(250, 204, 21, 0.95), rgba(202, 138, 4, 0.95));
+                border-color: rgba(250, 204, 21, 0.55);
+                color: #1a1305;
         }
 
         .button-accent:hover:not(:disabled) {
-                box-shadow: 0 10px 28px rgba(56, 189, 248, 0.4);
+                box-shadow: 0 10px 28px rgba(202, 138, 4, 0.45);
         }
 
         .button-ghost {
                 background: transparent;
-                border-color: rgba(148, 163, 184, 0.45);
-                color: rgba(224, 231, 255, 0.9);
+                border-color: rgba(250, 204, 21, 0.35);
+                color: rgba(254, 249, 195, 0.85);
         }
 
         .button-ghost:hover:not(:disabled) {
-                background: rgba(148, 163, 184, 0.12);
+                background: rgba(250, 204, 21, 0.12);
         }
 
         .button-neutral {
-                background: rgba(63, 81, 181, 0.32);
-                border-color: rgba(129, 140, 248, 0.45);
+                background: rgba(68, 52, 12, 0.6);
+                border-color: rgba(234, 179, 8, 0.4);
         }
 
         .button-danger {
@@ -720,8 +732,8 @@
                 margin-bottom: 14px;
                 padding: 12px 16px;
                 border-radius: 14px;
-                border: 1px solid rgba(148, 163, 184, 0.25);
-                background: rgba(30, 41, 59, 0.75);
+                border: 1px solid rgba(250, 204, 21, 0.32);
+                background: rgba(21, 16, 5, 0.85);
                 font-size: 0.9rem;
         }
 
@@ -744,9 +756,9 @@
         }
 
         .notice-banner.info {
-                border-color: rgba(59, 130, 246, 0.55);
-                background: rgba(59, 130, 246, 0.18);
-                color: #bfdbfe;
+                border-color: rgba(250, 204, 21, 0.55);
+                background: rgba(250, 204, 21, 0.16);
+                color: #facc15;
         }
 
         .notice-banner.ephemeral {
@@ -780,13 +792,13 @@
                 gap: 12px;
                 padding: 12px 14px;
                 border-radius: 14px;
-                border: 1px solid rgba(59, 72, 99, 0.45);
-                background: rgba(11, 16, 27, 0.85);
+                border: 1px solid rgba(130, 98, 14, 0.45);
+                background: rgba(14, 11, 4, 0.9);
         }
 
         .list-item.selected {
-                border-color: rgba(96, 165, 250, 0.7);
-                box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+                border-color: rgba(250, 204, 21, 0.7);
+                box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.35);
         }
 
         .list-primary {
@@ -832,9 +844,9 @@
         }
 
         .status-pill.neutral {
-                background: rgba(148, 163, 184, 0.18);
-                border-color: rgba(148, 163, 184, 0.35);
-                color: rgba(226, 232, 240, 0.9);
+                background: rgba(120, 90, 20, 0.24);
+                border-color: rgba(234, 179, 8, 0.4);
+                color: rgba(254, 240, 138, 0.9);
         }
 
         .button-row {
@@ -855,7 +867,7 @@
 
         .hint {
                 font-size: 0.86rem;
-                color: rgba(199, 210, 254, 0.68);
+                color: rgba(253, 224, 71, 0.62);
         }
 
         .friend-detail {
@@ -899,15 +911,15 @@
                 max-width: 70%;
                 padding: 10px 12px;
                 border-radius: 14px;
-                background: linear-gradient(160deg, rgba(56, 189, 248, 0.28), rgba(37, 99, 235, 0.24));
+                background: linear-gradient(150deg, rgba(250, 204, 21, 0.28), rgba(202, 138, 4, 0.24));
                 display: flex;
                 flex-direction: column;
                 gap: 4px;
-                box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
+                box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
         }
 
         .chat-list li.mine .bubble {
-                background: linear-gradient(160deg, rgba(16, 185, 129, 0.32), rgba(4, 120, 87, 0.32));
+                background: linear-gradient(150deg, rgba(250, 204, 21, 0.38), rgba(217, 119, 6, 0.36));
         }
 
         .bubble p {
@@ -916,7 +928,7 @@
 
         .timestamp {
                 font-size: 0.75rem;
-                color: rgba(226, 232, 240, 0.72);
+                color: rgba(253, 224, 71, 0.65);
         }
 
         .chat-form {

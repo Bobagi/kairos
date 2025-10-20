@@ -73,6 +73,39 @@ function normalizeHeadersInitToObject(headersInit?: HeadersInit): Record<string,
         return { ...headersInit };
 }
 
+export class ChronosApiError extends Error {
+        readonly status: number;
+        readonly method: string;
+        readonly path: string;
+        readonly bodyText: string;
+        readonly bodyJson: unknown | undefined;
+
+        constructor(args: {
+                status: number;
+                method: string;
+                path: string;
+                bodyText: string;
+                bodyJson?: unknown;
+        }) {
+                const { status, method, path, bodyText, bodyJson } = args;
+                const bodyMessage =
+                        typeof bodyJson === 'object' && bodyJson !== null && 'message' in bodyJson
+                                ? String((bodyJson as { message: unknown }).message ?? '').trim()
+                                : '';
+                const summary = bodyMessage || bodyText.trim();
+                super(
+                        `${method} ${path} → ${status}` +
+                                (summary ? ` ${summary}` : '')
+                );
+                this.name = 'ChronosApiError';
+                this.status = status;
+                this.method = method;
+                this.path = path;
+                this.bodyText = bodyText;
+                this.bodyJson = bodyJson;
+        }
+}
+
 async function performChronosApiRequestReturningJson<T = unknown>(
         path: string,
         init: RequestInit = {},
@@ -86,10 +119,32 @@ async function performChronosApiRequestReturningJson<T = unknown>(
         if (token) {
                 combinedHeaders.Authorization = `Bearer ${token}`;
         }
+        const method = String(init.method ?? 'GET').toUpperCase();
         const response = await fetch(url, { ...init, headers: combinedHeaders });
         if (!response.ok) {
-                const body = await response.text().catch(() => '');
-                throw new Error(`${init.method ?? 'GET'} ${path} → ${response.status} ${body}`);
+                let bodyText = '';
+                try {
+                        bodyText = await response.text();
+                } catch {
+                        bodyText = '';
+                }
+
+                let bodyJson: unknown | undefined;
+                if (bodyText) {
+                        try {
+                                bodyJson = JSON.parse(bodyText);
+                        } catch {
+                                bodyJson = undefined;
+                        }
+                }
+
+                throw new ChronosApiError({
+                        status: response.status,
+                        method,
+                        path,
+                        bodyText,
+                        bodyJson,
+                });
         }
         const contentType = response.headers.get('content-type') ?? '';
         if (contentType.includes('application/json')) {
