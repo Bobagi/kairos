@@ -7,9 +7,30 @@ interface KairosRuntimeEnvironmentVariables extends ImportMetaEnv {
 
 const runtimeEnvironmentVariables = import.meta.env as KairosRuntimeEnvironmentVariables;
 const configuredChronosBaseUrl = runtimeEnvironmentVariables.VITE_API_BASE_URL;
-const chronosApiBaseUrl: string = typeof configuredChronosBaseUrl === 'string'
-        ? configuredChronosBaseUrl.trim()
+
+const sanitizedConfiguredChronosBaseUrl = typeof configuredChronosBaseUrl === 'string'
+        ? configuredChronosBaseUrl.trim().replace(/\/+$/, '')
         : '';
+
+let resolvedChronosBaseUrl = sanitizedConfiguredChronosBaseUrl;
+
+if (typeof window !== 'undefined') {
+        const isHttpsPage = window.location.protocol === 'https:';
+        const isLocalPage =
+                window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const isConfiguredLocalHttpTarget =
+                sanitizedConfiguredChronosBaseUrl.startsWith('http://localhost') ||
+                sanitizedConfiguredChronosBaseUrl.startsWith('http://127.0.0.1');
+
+        if (isHttpsPage && isLocalPage && isConfiguredLocalHttpTarget) {
+                resolvedChronosBaseUrl = '';
+        }
+}
+
+function buildChronosApiUrl(path: string): string {
+        const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+        return resolvedChronosBaseUrl ? `${resolvedChronosBaseUrl}${normalizedPath}` : normalizedPath;
+}
 
 function normalizeHeadersInitToObject(headersInit?: HeadersInit): Record<string, string> {
         if (!headersInit) {
@@ -29,7 +50,7 @@ async function performChronosApiRequestReturningJson<T = unknown>(
         init: RequestInit = {},
         token?: string
 ): Promise<T> {
-        const url = `${chronosApiBaseUrl}${path}`;
+        const url = buildChronosApiUrl(path);
         const combinedHeaders: Record<string, string> = {
                 'Content-Type': 'application/json',
                 ...normalizeHeadersInitToObject(init.headers)
@@ -146,7 +167,7 @@ function convertChronosRawCardPayloadToCard(rawChronosCard: ChronosRawCardPayloa
 
 /* ---------- Health ---------- */
 export async function checkChronosHealthStatus(): Promise<string> {
-        const response = await fetch(`${chronosApiBaseUrl}/game/test`);
+        const response = await fetch(buildChronosApiUrl('/game/test'));
         if (!response.ok) throw new Error(`Health-check failed: ${response.status}`);
         return response.text();
 }
@@ -263,7 +284,7 @@ export async function fetchChronosGameStateById(
         gameIdentifier: string
 ): Promise<GameState | null> {
         const response = await fetch(
-                `${chronosApiBaseUrl}/game/state/${encodeURIComponent(gameIdentifier)}`
+                buildChronosApiUrl(`/game/state/${encodeURIComponent(gameIdentifier)}`)
         );
         if (!response.ok) throw new Error(`Failed to fetch game state: ${response.status}`);
         return (await response.json()) as GameState | null;
@@ -424,7 +445,7 @@ export async function fetchMultipleChronosCardMetadata(cardCodes: string[]): Pro
 export async function listAuthenticatedChronosPlayerActiveGames(
         token: string
 ): Promise<GameSummary[]> {
-        const response = await fetch(`${chronosApiBaseUrl}/game/active/mine`, {
+        const response = await fetch(buildChronosApiUrl('/game/active/mine'), {
                 headers: { Authorization: `Bearer ${token}` }
         });
         if (!response.ok) return [];
