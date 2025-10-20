@@ -12,9 +12,40 @@ const resolvedChronosBaseUrl = typeof configuredChronosBaseUrl === 'string'
         ? configuredChronosBaseUrl.trim().replace(/\/+$/, '')
         : '';
 
+function shouldFallbackToRelativeChronosRequests(baseUrl: string): boolean {
+        if (typeof window === 'undefined') {
+                return false;
+        }
+
+        try {
+                const parsedBaseUrl = new URL(baseUrl);
+                const { protocol: pageProtocol, hostname: pageHost } = window.location;
+
+                const isSecurePage = pageProtocol === 'https:';
+                const isLocalhost = /^(localhost|127\.0\.0\.1)$/i.test(parsedBaseUrl.hostname);
+                const sameHost = parsedBaseUrl.hostname === pageHost;
+
+                if (isSecurePage && parsedBaseUrl.protocol === 'http:' && sameHost && isLocalhost) {
+                        return true;
+                }
+        } catch {
+                return false;
+        }
+
+        return false;
+}
+
 function buildChronosApiUrl(path: string): string {
         const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-        return resolvedChronosBaseUrl ? `${resolvedChronosBaseUrl}${normalizedPath}` : normalizedPath;
+        if (!resolvedChronosBaseUrl) {
+                return normalizedPath;
+        }
+
+        if (shouldFallbackToRelativeChronosRequests(resolvedChronosBaseUrl)) {
+                return normalizedPath;
+        }
+
+        return `${resolvedChronosBaseUrl}${normalizedPath}`;
 }
 
 function normalizeHeadersInitToObject(headersInit?: HeadersInit): Record<string, string> {
